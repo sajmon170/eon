@@ -2,5 +2,16 @@
 name = "libp2p-beams"
 version = "0.1.0"
 edition = "2021"
+publish = false
+license = "MIT"
+
+[package.metadata.release]
+release = false
 
 [dependencies]
+serde = { version = "1.0", features = ["derive"] }
+clap = { version = "4.5.6", features = ["derive"] }
+libp2p = { version = "0.54.1", features = ["tokio", "cbor", "dns", "kad", "noise", "macros", "request-response", "tcp", "websocket", "yamux"] }
+tokio = { version = "1.42.0", features = ["full"] }
+futures = "0.3.31"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
