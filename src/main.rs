@@ -1,4 +1,6 @@
 mod network;
+mod event_loop;
+mod stream_manager;
 
 use std::{error::Error, io::Write, path::PathBuf};
 
@@ -17,7 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
 
     let (mut network_client, mut network_events, network_event_loop) =
-        network::new(opt.secret_key_seed).await?;
+        network::new(opt.secret_key_seed, opt.bootstrap_mode).await?;
 
     // Spawn the network task for it to run in the background.
     spawn(network_event_loop.run());
@@ -46,6 +48,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .expect("Dial to succeed");
     }
 
+    //tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    if !opt.bootstrap_mode {
+        network_client.bootstrap().await?;
+        println!("Finished bootstrapping.");
+    }
+
     match opt.argument {
         // Providing a file.
         CliArgument::Provide { path, name } => {
@@ -55,7 +63,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             loop {
                 match network_events.next().await {
                     // Reply with the content of the file on incoming requests.
-                    Some(network::Event::InboundRequest { request, channel }) => {
+                    Some(event_loop::Event::InboundRequest { request, channel }) => {
+                        println!("Responding!");
                         if request == name {
                             network_client
                                 .respond_file(std::fs::read(&path)?, channel)
@@ -76,6 +85,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             // Request the content of the file from each node.
             let requests = providers.into_iter().map(|p| {
+                println!("Found provider: {p}");
                 let mut network_client = network_client.clone();
                 let name = name.clone();
                 async move { network_client.request_file(p, name).await }.boxed()
@@ -106,6 +116,9 @@ struct Opt {
 
     #[clap(long)]
     listen_address: Option<Multiaddr>,
+
+    #[clap(long, action)]
+    bootstrap_mode: bool,
 
     #[clap(subcommand)]
     argument: CliArgument,
