@@ -2,6 +2,13 @@ mod network;
 mod event_loop;
 mod stream_manager;
 
+mod system;
+mod parser;
+mod minivault;
+mod pins;
+mod testing_obj;
+mod core;
+
 use std::{error::Error, io::Write, path::PathBuf};
 
 use clap::Parser;
