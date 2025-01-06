@@ -23,3 +23,5 @@ base64 = "0.22.1"
 blake3 = { version = "1.5.5", features = ["serde"] }
 tokio-util = { version = "0.7.13", features = ["full"] }
 anyhow = "1.0.95"
+tracing-appender = "0.2.3"
+tracing = "0.1.41"

@@ -21,6 +21,8 @@ use libp2p::{
 };
 use serde::{Deserialize, Serialize};
 
+use tracing::{Level, event};
+
 pub(crate) struct EventLoop {
     swarm: Swarm<Behaviour>,
     command_receiver: mpsc::Receiver<Command>,
@@ -72,7 +74,8 @@ impl EventLoop {
                 identify::Event::Received { connection_id, peer_id, info }
             )) => {
                 for addr in info.listen_addrs {
-                    println!("Found new listen addr: {addr} for peer: {peer_id}");
+                    event!(Level::INFO,
+                           "Found new listen addr: {addr} for peer: {peer_id}");
                     self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
                 }
             }
@@ -177,7 +180,8 @@ impl EventLoop {
             )) => {}
             SwarmEvent::NewListenAddr { address, .. } => {
                 let local_peer_id = *self.swarm.local_peer_id();
-                eprintln!(
+                event!(
+                    Level::INFO,
                     "Local node is listening on {:?}",
                     address.with(Protocol::P2p(local_peer_id))
                 );
@@ -186,7 +190,7 @@ impl EventLoop {
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
-                println!("Established incoming from {peer_id}");
+                event!(Level::INFO, "Established incoming from {peer_id}");
                 if endpoint.is_dialer() {
                     if let Some(sender) = self.pending_dial.remove(&peer_id) {
                         let _ = sender.send(Ok(()));
@@ -195,7 +199,7 @@ impl EventLoop {
             }
             SwarmEvent::ConnectionClosed { .. } => {}
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                eprintln!("Outgoing error: {error}");
+                event!(Level::INFO, "Outgoing error: {error}");
 
                 if let Some(peer_id) = peer_id {
                     if let Some(sender) = self.pending_dial.remove(&peer_id) {
@@ -204,13 +208,13 @@ impl EventLoop {
                 }
             }
             SwarmEvent::IncomingConnectionError { error, send_back_addr, .. } => {
-                eprintln!("Incoming error: {error} from {send_back_addr}")
+                event!(Level::INFO, "Incoming error: {error} from {send_back_addr}")
             }
             SwarmEvent::Dialing {
                 peer_id: Some(peer_id),
                 ..
             } => {
-                eprintln!("Dialing {peer_id}");
+                event!(Level::INFO, "Dialing {peer_id}");
             }
             _ => {}
         }

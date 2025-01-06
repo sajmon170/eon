@@ -9,24 +9,62 @@ mod pins;
 mod testing_obj;
 mod core;
 
-use std::{error::Error, io::Write, path::PathBuf};
+use std::{error::Error, io::Write, path::PathBuf, fs::File};
 
 use clap::Parser;
 use futures::{prelude::*, StreamExt};
-use libp2p::{core::Multiaddr, multiaddr::Protocol};
+use libp2p::{core::Multiaddr, multiaddr::Protocol, identity::{Keypair, self}};
 use tokio::task::spawn;
 use tracing_subscriber::EnvFilter;
+use tracing_appender::{non_blocking, non_blocking::WorkerGuard};
+use tracing::{Level, event};
+use anyhow::Result;
+
+fn init_tracing(name: &str) -> Result<WorkerGuard> {
+    let file = File::create(format!("{name}.log"))?;
+    let (non_blocking, guard) = non_blocking(file);
+
+    let env_filter = EnvFilter::builder()
+        .with_default_directive(Level::INFO.into())
+        .from_env_lossy();
+
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_env_filter(env_filter)
+        .init();
+    
+    // Alternative subscriber - Tokio Console
+    // console_subscriber::init();
+
+    Ok(guard)
+}
+
+fn get_keypair(secret_key_seed: Option<u8>) -> Keypair {
+    match secret_key_seed {
+        Some(seed) => {
+            let mut bytes = [0u8; 32];
+            bytes[0] = seed;
+            identity::Keypair::ed25519_from_bytes(bytes).unwrap()
+        }
+        None => identity::Keypair::generate_ed25519(),
+    }
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .try_init();
-
     let opt = Opt::parse();
 
+    let keypair = get_keypair(opt.secret_key_seed);
+    let peer_id = keypair.public().to_peer_id();
+    println!("My id: {peer_id}");
+
+    let _guard = init_tracing(&peer_id.to_base58())?;
+
+    event!(Level::INFO, "Hello.");
+
     let (mut network_client, mut network_events, network_event_loop) =
-        network::new(opt.secret_key_seed, opt.bootstrap_mode).await?;
+        network::new(keypair, opt.bootstrap_mode).await?;
 
     // Spawn the network task for it to run in the background.
     spawn(network_event_loop.run());
@@ -58,7 +96,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     if !opt.bootstrap_mode {
         network_client.bootstrap().await?;
-        println!("Finished bootstrapping.");
+        event!(Level::INFO, "Finished bootstrapping.");
     }
 
     match opt.argument {
@@ -71,7 +109,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 match network_events.next().await {
                     // Reply with the content of the file on incoming requests.
                     Some(event_loop::Event::InboundRequest { request, channel }) => {
-                        println!("Responding!");
+                        event!(Level::INFO, "Responding to request.");
                         if request == name {
                             network_client
                                 .respond_file(std::fs::read(&path)?, channel)
@@ -92,7 +130,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             // Request the content of the file from each node.
             let requests = providers.into_iter().map(|p| {
-                println!("Found provider: {p}");
+                event!(Level::INFO, "Found provider: {p}");
                 let mut network_client = network_client.clone();
                 let name = name.clone();
                 async move { network_client.request_file(p, name).await }.boxed()

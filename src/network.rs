@@ -17,7 +17,7 @@ use libp2p::{
     request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel},
     swarm::{NetworkBehaviour, Swarm, SwarmEvent},
     tcp, yamux, PeerId, StreamProtocol,
-    identify
+    identify,
 };
 use serde::{Deserialize, Serialize};
 
@@ -31,22 +31,11 @@ use crate::event_loop::*;
 ///
 /// - The network task driving the network itself.
 pub(crate) async fn new(
-    secret_key_seed: Option<u8>,
+    id_keys: identity::Keypair,
     is_bootstrap: bool
 ) -> Result<(Client, impl Stream<Item = Event>, EventLoop), Box<dyn Error>> {
-    // Create a public/private key pair, either random or based on a seed.
-    let id_keys = match secret_key_seed {
-        Some(seed) => {
-            let mut bytes = [0u8; 32];
-            bytes[0] = seed;
-            identity::Keypair::ed25519_from_bytes(bytes).unwrap()
-        }
-        None => identity::Keypair::generate_ed25519(),
-    };
     let peer_id = id_keys.public().to_peer_id();
-
-    println!("My id: {peer_id}");
-
+    
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys)
         .with_tokio()
         .with_tcp(
@@ -87,15 +76,7 @@ pub(crate) async fn new(
     if !is_bootstrap {
         let bootstrap_id: PeerId = "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X"
             .parse().unwrap();
-        let bootstrap_addr: Multiaddr = "/ip4/192.168.8.112/tcp/22137".parse()?;
-
-        /*
-        swarm.dial(bootstrap_addr.clone().with(Protocol::P2p(bootstrap_id)))?;
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        
-        println!("Dialed!");
-        */
+        let bootstrap_addr: Multiaddr = "/ip4/127.0.0.1/tcp/22137".parse()?;
 
         swarm
             .behaviour_mut()
