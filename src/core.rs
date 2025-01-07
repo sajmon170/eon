@@ -17,7 +17,7 @@ pub trait Typed: Serialize + DeserializeOwned {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypedObject {
     pub uuid: Uuid,
     pub data: Vec<u8>,
@@ -33,7 +33,7 @@ impl TypedObject {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignedObject {
     pub object: TypedObject,
     pub signature: Signature,

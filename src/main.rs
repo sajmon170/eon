@@ -1,6 +1,11 @@
+#![allow(dead_code, unused)]
 mod network;
 mod event_loop;
 mod stream_manager;
+mod repl;
+mod app_cli;
+mod app_controller;
+mod app_state;
 
 mod system;
 mod parser;
@@ -19,6 +24,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_appender::{non_blocking, non_blocking::WorkerGuard};
 use tracing::{Level, event};
 use anyhow::Result;
+//use network_manager::NetworkManager;
 
 fn init_tracing(name: &str) -> Result<WorkerGuard> {
     let file = File::create(format!("{name}.log"))?;
@@ -32,9 +38,6 @@ fn init_tracing(name: &str) -> Result<WorkerGuard> {
         .with_writer(non_blocking)
         .with_env_filter(env_filter)
         .init();
-    
-    // Alternative subscriber - Tokio Console
-    // console_subscriber::init();
 
     Ok(guard)
 }
@@ -93,58 +96,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .expect("Dial to succeed");
     }
 
-    //tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     if !opt.bootstrap_mode {
         network_client.bootstrap().await?;
         event!(Level::INFO, "Finished bootstrapping.");
     }
 
-    match opt.argument {
-        // Providing a file.
-        CliArgument::Provide { path, name } => {
-            // Advertise oneself as a provider of the file on the DHT.
-            network_client.start_providing(name.clone()).await;
-
-            loop {
-                match network_events.next().await {
-                    // Reply with the content of the file on incoming requests.
-                    Some(event_loop::Event::InboundRequest { request, channel }) => {
-                        event!(Level::INFO, "Responding to request.");
-                        if request == name {
-                            network_client
-                                .respond_file(std::fs::read(&path)?, channel)
-                                .await;
-                        }
-                    }
-                    e => todo!("{:?}", e),
-                }
-            }
-        }
-        // Locating and getting a file.
-        CliArgument::Get { name } => {
-            // Locate all nodes providing the file.
-            let providers = network_client.get_providers(name.clone()).await;
-            if providers.is_empty() {
-                return Err(format!("Could not find provider for file {name}.").into());
-            }
-
-            // Request the content of the file from each node.
-            let requests = providers.into_iter().map(|p| {
-                event!(Level::INFO, "Found provider: {p}");
-                let mut network_client = network_client.clone();
-                let name = name.clone();
-                async move { network_client.request_file(p, name).await }.boxed()
-            });
-
-            // Await the requests, ignore the remaining once a single one succeeds.
-            let file_content = futures::future::select_ok(requests)
-                .await
-                .map_err(|_| "None of the providers returned file.")?
-                .0;
-
-            std::io::stdout().write_all(&file_content)?;
-        }
-    }
+    let mut app = app_cli::AppCli::new(network_client, network_events);
+    app.run().await?;
 
     Ok(())
 }
@@ -170,7 +128,7 @@ struct Opt {
 }
 
 #[derive(Debug, Parser)]
-enum CliArgument {
+pub enum CliArgument {
     Provide {
         #[clap(long)]
         path: PathBuf,

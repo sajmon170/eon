@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 
 use tracing::{Level, event};
 
+use crate::core::*;
+
 pub(crate) struct EventLoop {
     swarm: Swarm<Behaviour>,
     command_receiver: mpsc::Receiver<Command>,
@@ -30,8 +32,8 @@ pub(crate) struct EventLoop {
     pending_dial: HashMap<PeerId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
     pending_start_providing: HashMap<kad::QueryId, oneshot::Sender<()>>,
     pending_get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
-    pending_request_file:
-        HashMap<OutboundRequestId, oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>>,
+    pending_request_object:
+        HashMap<OutboundRequestId, oneshot::Sender<Result<SignedObject, Box<dyn Error + Send>>>>,
     bootstrap_listener: Option<oneshot::Sender<()>>
 }
 
@@ -48,7 +50,7 @@ impl EventLoop {
             pending_dial: Default::default(),
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
-            pending_request_file: Default::default(),
+            pending_request_object: Default::default(),
             bootstrap_listener: Default::default()
         }
     }
@@ -139,7 +141,7 @@ impl EventLoop {
                 }
             },
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(_)) => {}
-            SwarmEvent::Behaviour(BehaviourEvent::FileExchange(
+            SwarmEvent::Behaviour(BehaviourEvent::ObjectExchange(
                 request_response::Event::Message { message, .. },
             )) => match message {
                 request_response::Message::Request {
@@ -158,24 +160,24 @@ impl EventLoop {
                     response,
                 } => {
                     let _ = self
-                        .pending_request_file
+                        .pending_request_object
                         .remove(&request_id)
                         .expect("Request to still be pending.")
                         .send(Ok(response.0));
                 }
             },
-            SwarmEvent::Behaviour(BehaviourEvent::FileExchange(
+            SwarmEvent::Behaviour(BehaviourEvent::ObjectExchange(
                 request_response::Event::OutboundFailure {
                     request_id, error, ..
                 },
             )) => {
                 let _ = self
-                    .pending_request_file
+                    .pending_request_object
                     .remove(&request_id)
                     .expect("Request to still be pending.")
                     .send(Err(Box::new(error)));
             }
-            SwarmEvent::Behaviour(BehaviourEvent::FileExchange(
+            SwarmEvent::Behaviour(BehaviourEvent::ObjectExchange(
                 request_response::Event::ResponseSent { .. },
             )) => {}
             SwarmEvent::NewListenAddr { address, .. } => {
@@ -253,40 +255,40 @@ impl EventLoop {
                     todo!("Already dialing peer.");
                 }
             }
-            Command::StartProviding { file_name, sender } => {
+            Command::StartProviding { object, sender } => {
                 let query_id = self
                     .swarm
                     .behaviour_mut()
                     .kademlia
-                    .start_providing(file_name.into_bytes().into())
+                    .start_providing(Vec::from(object).into())
                     .expect("No store error.");
                 self.pending_start_providing.insert(query_id, sender);
             }
-            Command::GetProviders { file_name, sender } => {
+            Command::GetProviders { object, sender } => {
                 let query_id = self
                     .swarm
                     .behaviour_mut()
                     .kademlia
-                    .get_providers(file_name.into_bytes().into());
+                    .get_providers(Vec::from(object).into());
                 self.pending_get_providers.insert(query_id, sender);
             }
-            Command::RequestFile {
-                file_name,
+            Command::RequestObject {
+                object,
                 peer,
                 sender,
             } => {
                 let request_id = self
                     .swarm
                     .behaviour_mut()
-                    .file_exchange
-                    .send_request(&peer, FileRequest(file_name));
-                self.pending_request_file.insert(request_id, sender);
+                    .object_exchange
+                    .send_request(&peer, ObjectRequest(object));
+                self.pending_request_object.insert(request_id, sender);
             }
-            Command::RespondFile { file, channel } => {
+            Command::RespondObject { object, channel } => {
                 self.swarm
                     .behaviour_mut()
-                    .file_exchange
-                    .send_response(channel, FileResponse(file))
+                    .object_exchange
+                    .send_response(channel, ObjectResponse(object))
                     .expect("Connection to peer to be still open.");
             }
         }
@@ -295,7 +297,7 @@ impl EventLoop {
 
 #[derive(NetworkBehaviour)]
 pub(crate) struct Behaviour {
-    pub file_exchange: request_response::cbor::Behaviour<FileRequest, FileResponse>,
+    pub object_exchange: request_response::cbor::Behaviour<ObjectRequest, ObjectResponse>,
     pub data_stream: libp2p_stream::Behaviour,
     pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
     pub identify: identify::Behaviour
@@ -316,34 +318,34 @@ pub(crate) enum Command {
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
     },
     StartProviding {
-        file_name: String,
+        object: ObjectId,
         sender: oneshot::Sender<()>,
     },
     GetProviders {
-        file_name: String,
+        object: ObjectId,
         sender: oneshot::Sender<HashSet<PeerId>>,
     },
-    RequestFile {
-        file_name: String,
+    RequestObject {
+        object: ObjectId,
         peer: PeerId,
-        sender: oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<SignedObject, Box<dyn Error + Send>>>,
     },
-    RespondFile {
-        file: Vec<u8>,
-        channel: ResponseChannel<FileResponse>,
+    RespondObject {
+        object: SignedObject,
+        channel: ResponseChannel<ObjectResponse>,
     },
 }
 
 #[derive(Debug)]
 pub(crate) enum Event {
     InboundRequest {
-        request: String,
-        channel: ResponseChannel<FileResponse>,
+        request: ObjectId,
+        channel: ResponseChannel<ObjectResponse>,
     },
 }
 
 // Simple file exchange protocol
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct FileRequest(String);
+pub(crate) struct ObjectRequest(ObjectId);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct FileResponse(Vec<u8>);
+pub(crate) struct ObjectResponse(SignedObject);

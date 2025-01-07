@@ -22,6 +22,9 @@ use libp2p::{
 use serde::{Deserialize, Serialize};
 
 use crate::event_loop::*;
+use crate::core::*;
+
+pub type EventStream = mpsc::Receiver<Event>;
 
 /// Creates the network components, namely:
 ///
@@ -33,10 +36,10 @@ use crate::event_loop::*;
 pub(crate) async fn new(
     id_keys: identity::Keypair,
     is_bootstrap: bool
-) -> Result<(Client, impl Stream<Item = Event>, EventLoop), Box<dyn Error>> {
+) -> Result<(Client, EventStream, EventLoop), Box<dyn Error>> {
     let peer_id = id_keys.public().to_peer_id();
     
-    let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys)
+    let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys.clone())
         .with_tokio()
         .with_tcp(
             tcp::Config::default(),
@@ -48,9 +51,9 @@ pub(crate) async fn new(
                 peer_id,
                 kad::store::MemoryStore::new(key.public().to_peer_id()),
             ),
-            file_exchange: request_response::cbor::Behaviour::new(
+            object_exchange: request_response::cbor::Behaviour::new(
                 [(
-                    StreamProtocol::new("/file-exchange/1"),
+                    StreamProtocol::new("/object-exchange/1"),
                     ProtocolSupport::Full,
                 )],
                 request_response::Config::default(),
@@ -94,6 +97,7 @@ pub(crate) async fn new(
 
     Ok((
         Client {
+            keys: id_keys,
             sender: command_sender
         },
         event_receiver,
@@ -103,6 +107,7 @@ pub(crate) async fn new(
 
 #[derive(Clone)]
 pub(crate) struct Client {
+    keys: identity::Keypair,
     sender: mpsc::Sender<Command>
 }
 
@@ -110,14 +115,17 @@ impl Client {
     pub(crate) async fn bootstrap(&mut self) -> Result<(), Box<dyn Error>> {
         let (sender, receiver) = oneshot::channel::<()>();
 
-        self.sender
+        let _ = self.sender
             .send(Command::NotifyAfterBootstrap { sender })
-            .await
-            .unwrap();
+            .await;
 
         receiver.await.unwrap();
 
         Ok(())
+    }
+
+    pub fn get_keys(&self) -> &identity::Keypair {
+        &self.keys
     }
     
     /// Listen for incoming connections on the given address.
@@ -126,10 +134,10 @@ impl Client {
         addr: Multiaddr,
     ) -> Result<(), Box<dyn Error + Send>> {
         let (sender, receiver) = oneshot::channel();
-        self.sender
+        let _ = self.sender
             .send(Command::StartListening { addr, sender })
-            .await
-            .expect("Command receiver not to be dropped.");
+            .await;
+        
         receiver.await.expect("Sender not to be dropped.")
     }
 
@@ -140,34 +148,31 @@ impl Client {
         peer_addr: Multiaddr,
     ) -> Result<(), Box<dyn Error + Send>> {
         let (sender, receiver) = oneshot::channel();
-        self.sender
+        let _ = self.sender
             .send(Command::Dial {
                 peer_id,
                 peer_addr,
                 sender,
             })
-            .await
-            .expect("Command receiver not to be dropped.");
+            .await;
         receiver.await.expect("Sender not to be dropped.")
     }
 
     /// Advertise the local node as the provider of the given file on the DHT.
-    pub(crate) async fn start_providing(&mut self, file_name: String) {
+    pub(crate) async fn start_providing(&mut self, object: ObjectId) {
         let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Command::StartProviding { file_name, sender })
-            .await
-            .expect("Command receiver not to be dropped.");
+        let _ = self.sender
+            .send(Command::StartProviding { object, sender })
+            .await;
         receiver.await.expect("Sender not to be dropped.");
     }
 
     /// Find the providers for the given file on the DHT.
-    pub(crate) async fn get_providers(&mut self, file_name: String) -> HashSet<PeerId> {
+    pub(crate) async fn get_providers(&mut self, object: ObjectId) -> HashSet<PeerId> {
         let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Command::GetProviders { file_name, sender })
-            .await
-            .expect("Command receiver not to be dropped.");
+        let _ = self.sender
+            .send(Command::GetProviders { object, sender })
+            .await;
         receiver.await.expect("Sender not to be dropped.")
     }
 
@@ -175,33 +180,27 @@ impl Client {
     pub(crate) async fn request_file(
         &mut self,
         peer: PeerId,
-        file_name: String,
-    ) -> Result<Vec<u8>, Box<dyn Error + Send>> {
+        object: ObjectId,
+    ) -> Result<SignedObject, Box<dyn Error + Send>> {
         let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Command::RequestFile {
-                file_name,
+        let _ = self.sender
+            .send(Command::RequestObject {
+                object,
                 peer,
                 sender,
             })
-            .await
-            .expect("Command receiver not to be dropped.");
+            .await;
         receiver.await.expect("Sender not be dropped.")
     }
 
     /// Respond with the provided file content to the given request.
     pub(crate) async fn respond_file(
         &mut self,
-        file: Vec<u8>,
-        channel: ResponseChannel<FileResponse>,
+        object: SignedObject,
+        channel: ResponseChannel<ObjectResponse>,
     ) {
-        self.sender
-            .send(Command::RespondFile { file, channel })
-            .await
-            .expect("Command receiver not to be dropped.");
-    }
-
-    pub(crate) async fn handle_data_stream() {
-        
+        let _ = self.sender
+            .send(Command::RespondObject { object, channel })
+            .await;
     }
 }

@@ -1,3 +1,4 @@
+
 use uuid::Uuid;
 use crate::core::*;
 use crate::pins::*;
@@ -5,9 +6,12 @@ use crate::testing_obj::*;
 use crate::minivault::SystemDatabase;
 use crate::system;
 use std::collections::HashMap;
+use base64::prelude::*;
 
-type ParsingFn = Box<dyn Fn(&mut SystemDatabase, &SignedObject) -> Option<ParsingResult>>;
-type HookFn = Box<dyn Fn(&mut SystemDatabase, &SignedObject)>;
+use tracing::warn;
+
+type ParsingFn = fn(&mut SystemDatabase, &SignedObject) -> Option<ParsingResult>;
+type HookFn = fn(&mut SystemDatabase, &SignedObject);
 
 pub struct SystemState {
     parser_map: HashMap<Uuid, ParsingFn>,
@@ -38,7 +42,7 @@ impl SystemState {
     pub fn new() -> Self {
         Self {
             parser_map: Default::default(),
-            default_parser: Self::get_default_parser(),
+            default_parser: Self::default_parser,
             db: Default::default()
         }
     }
@@ -65,12 +69,10 @@ impl SystemState {
             }
         }
     }
-
-    fn get_default_parser() -> ParsingFn {
-        Box::new(|db, object| {
-            db.add_object(object.clone());
-            None
-        })
+    
+    fn default_parser(db: &mut SystemDatabase, obj: &SignedObject) -> Option<ParsingResult> {
+        db.add_object(obj.clone());
+        None
     }
 
     pub fn register_parser(&mut self, uuid: Uuid, parser: ParsingFn) {
@@ -90,10 +92,19 @@ impl SystemState {
             println!("No tags found for id [{}]", crate::system::hash_str(id));
         }
     }
+
+    pub fn get_object(&self, id: ObjectId) -> Option<SignedObject> {
+        let result = self.db.objects.get(&id).cloned();
+        if result.is_none() {
+            warn!("Requested object [id: {}] not found",
+                  BASE64_STANDARD.encode(&id));
+        }
+        result
+    }
 }
 
 pub fn setup_pin_object_parser(state: &mut SystemState) {
-    state.register_parser(PinObject::UUID, Box::new(|db, object| {
+    fn setup_pins(db: &mut SystemDatabase, object: &SignedObject) -> Option<ParsingResult> {
         let pin_obj = system::deserialize::<PinObject>(object.get_data());
         let flattened = pin_obj.flatten();
         db.add_pin(flattened);
@@ -109,21 +120,37 @@ pub fn setup_pin_object_parser(state: &mut SystemState) {
         }
         
         ParsingResult::new(included).into()
-    }));
+    }
+
+    state.register_parser(PinObject::UUID, setup_pins);
 }
 
 pub fn setup_tag_object_parser(state: &mut SystemState) {
-    state.register_parser(Tag::UUID, Box::new(|db, object| {
+    fn setup_tags(db: &mut SystemDatabase, object: &SignedObject) -> Option<ParsingResult> {
         let tag = system::deserialize::<Tag>(object.get_data());
         db.add_tag(object.get_object_id(), tag);
         None
-    }));
+    }
+    
+    state.register_parser(Tag::UUID, setup_tags);
 }
 
 pub fn setup_poem_parser(state: &mut SystemState) {
-    state.register_parser(Poem::UUID, Box::new(|db, object| {
-        let poem = system::deserialize::<Poem>(object.get_data());
-        db.add_poem(object.get_object_id(), poem);
+    fn setup_poems(db: &mut SystemDatabase, object: &SignedObject) -> Option<ParsingResult> {
+        db.add_object(object.clone());
+        db.add_poem(object.get_object_id());
         None
-    }));
+    }
+    
+    state.register_parser(Poem::UUID, setup_poems);
+}
+
+pub fn setup_file_parser(state: &mut SystemState) {
+    fn setup_files(db: &mut SystemDatabase, object: &SignedObject) -> Option<ParsingResult> {
+        db.add_object(object.clone());
+        db.add_file(object.get_object_id());
+        None
+    }
+    
+    state.register_parser(BinaryFile::UUID, setup_files);
 }

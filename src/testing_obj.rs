@@ -49,3 +49,30 @@ impl Display for Poem {
 impl Typed for Poem {
     const UUID: Uuid = uuid!("d630cef4-b8e2-4c96-823b-28df2445818a");
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct BinaryFile {
+    pub filename: String,
+    pub bytes: Vec<u8>
+}
+
+impl Typed for BinaryFile {
+    const UUID: Uuid = uuid!("d5003cdd-1076-4554-b195-b6907207afca");
+}
+
+impl BinaryFile {
+    // TODO - handle errors
+    pub fn new(path: &std::path::Path) -> Self {
+        let filename = path.file_name().unwrap().to_owned().into_string().unwrap();
+        let bytes = std::fs::read(path).unwrap();
+
+        Self {
+            filename,
+            bytes
+        }
+    }
+
+    pub fn save(&self, path: &std::path::Path) {
+        std::fs::write(path.join(&self.filename), &self.bytes).unwrap();
+    }
+}
