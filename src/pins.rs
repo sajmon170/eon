@@ -1,6 +1,8 @@
 use serde::{Serialize, Deserialize};
 use uuid::{Uuid, uuid};
 use crate::core::*;
+use crate::parsing::*;
+use std::collections::HashMap;
 
 pub type TagId = ObjectId;
 
@@ -12,6 +14,47 @@ pub struct PinObject {
 
 impl Typed for PinObject {
     const UUID: Uuid = uuid!("8f729e1f-ea53-4283-b9e2-266ea09302d0");
+}
+
+impl Parsable for PinObject {
+    fn parse(db: &mut SystemDatabase, id: ObjectId, pin: Self) -> Option<ParsingResult> {
+        let flattened = pin.flatten();
+
+        Self::extract_custom_db(db).unwrap()
+            .links.push(flattened);
+        
+        let included = pin.to;
+        
+        ParsingResult::new(included).into()
+    }
+    
+}
+
+#[derive(Default)]
+pub struct PinDb {
+    links: Vec<FlatPin>
+}
+
+impl CustomDatabase for PinDb {
+    fn cleanup_id(&mut self, id: &ObjectId) {
+        self.links.retain(|flatpin| flatpin.to != *id && flatpin.from != *id);
+    }
+}
+
+impl UseCustomDb for PinObject {
+    type Database = PinDb;
+
+    fn init_custom_db() -> Self::Database {
+        Self::Database::default()
+    }
+}
+
+impl PinDb {
+    fn get_pinned(&self, id: &ObjectId) -> Vec<ObjectId> {
+        self.links.iter()
+            .filter_map(|link| if &link.from == id { Some(link.to) } else { None })
+            .collect()
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,11 +87,33 @@ impl PinObject {
 }
 
 #[derive(Serialize, Deserialize)]
+struct PinnedWith(ObjectId);
+
+impl Typed for PinnedWith {
+    const UUID: Uuid = uuid!("14810393-ecc4-437e-bfc5-ad2657d9eb60");
+}
+
+impl Query for PinnedWith {
+    fn parse(db: &mut SystemDatabase, id: ObjectId, query: Self) -> Option<QueryResult> {
+        let pin_db = PinObject::extract_custom_db(db).unwrap();
+        let pinned = pin_db.get_pinned(&id);
+        
+        db.get_query(&id)
+            .retain(|id| pinned.contains(&id));
+
+        db.finish_query(&id)
+            .map(|result| QueryResult::Return(result))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Tag(String);
 
 impl Typed for Tag {
     const UUID: Uuid = uuid!("65152eb0-896c-4c88-ae27-f077fd5c364d");
 }
+
+impl Parsable for Tag { }
 
 impl Tag {
     pub fn new(tag: &str) -> Self {

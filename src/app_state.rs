@@ -1,14 +1,16 @@
-use crate::parser::*;
+use crate::object_parser::*;
+use crate::pins::{PinObject, Tag};
+use crate::testing_obj::{Poem, BinaryFile};
 use crate::core::*;
 use tokio::{sync::{mpsc, oneshot}, task::spawn};
 
 enum DataMessage {
     StoreObject(SignedObject),
-    GetObject(ObjectId, oneshot::Sender<Option<SignedObject>>)
+    QueryObject(TypedObject, oneshot::Sender<Option<SignedObject>>)
 }
 
 struct AppState {
-    state: SystemState,
+    parser: ObjectParser,
     rx: mpsc::Receiver<DataMessage>
 }
 
@@ -16,7 +18,7 @@ impl AppState {
     async fn run(&mut self) {
         while let Some(request) = self.rx.recv().await {
             match request {
-                DataMessage::GetObject(id, sender) => self.get_object(id, sender),
+                DataMessage::QueryObject(query, sender) => self.get_object(id, sender),
                 DataMessage::StoreObject(obj) => self.add_object(obj)
             }
         }
@@ -40,10 +42,10 @@ impl AppStateHandle {
         let (tx, rx) = mpsc::channel(32);
 
         let mut state = SystemState::new();
-        setup_file_parser(&mut state);
-        setup_pin_object_parser(&mut state);
-        setup_poem_parser(&mut state);
-        setup_tag_object_parser(&mut state);
+        state.register_parser::<BinaryFile>();
+        state.register_parser::<PinObject>();
+        state.register_parser::<Poem>();
+        state.register_parser::<Tag>();
         
         let mut state = AppState { state, rx };
 
@@ -52,9 +54,9 @@ impl AppStateHandle {
         Self { tx }
     }
 
-    pub async fn get(&mut self, obj: ObjectId) -> Option<SignedObject> {
+    pub async fn query(&mut self, query: TypedObject) -> Option<SignedObject> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.tx.send(DataMessage::GetObject(obj, tx)).await;
+        let _ = self.tx.send(DataMessage::QueryObject(query, tx)).await;
         rx.await.unwrap()
     }
 

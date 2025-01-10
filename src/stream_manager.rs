@@ -17,6 +17,7 @@ enum StreamCommand {
     OpenStream(PeerId, StreamSender)
 }
 
+#[derive(Clone)]
 pub struct StreamRouterHandle {
     tx: mpsc::Sender<(Hash, StreamCommand)>
 }
@@ -67,7 +68,6 @@ impl StreamRouter {
         }
     }
 }
-
 
 struct StreamProtocolActor {
     tx: mpsc::Sender<StreamCommand>
@@ -150,67 +150,3 @@ impl StreamProtocolHandler {
         Ok(())
     }
 }
-/*
-
-struct StreamManager {
-    control: Control,
-    commands: mpsc::Receiver<StreamCommand>
-}
-
-impl StreamManager {
-    fn get_stream_protocol(hash: &Hash) -> StreamProtocol {
-        let proto_str = format!("/file-encode/{}", BASE64_STANDARD.encode(hash));
-        StreamProtocol::try_from_owned(proto_str).unwrap()
-    }
-    
-    async fn request_hash(mut ctrl: Control, peer: PeerId, hash: Hash) -> Result<()> {
-        let stream = ctrl.open_stream(peer, Self::get_stream_protocol(&hash)).await?;
-
-        let mut bytes: &[u8] = b"Hello, world!";
-
-        // TODO: replace this with vault
-        tokio::io::copy(&mut bytes, &mut stream.compat()).await?;
-
-        Ok(())
-    }
-
-    async fn await_hash(mut ctrl: Control, peer: PeerId, hash: Hash) -> Result<()> {
-        // TODO: test whether this creates a race condition when multiple peers
-        // ask for the same file
-
-        let (id, mut stream) = ctrl.accept(Self::get_stream_protocol(&hash))?
-            .next().await
-            .ok_or(anyhow!("Stream dropped prematurely"))?;
-
-        /*
-        if id != peer {
-            Err(anyhow!("This "))
-    }
-        */
-
-        let mut bytes = Vec::with_capacity(1000);
-
-        // TODO: replace this with vault
-        tokio::io::copy(&mut stream.compat(), &mut bytes).await?;
-
-        println!("{}", std::str::from_utf8(&bytes).unwrap());
-        
-        Ok(())
-    }
-
-    async fn run(&mut self) {
-        while let Some(cmd) = self.commands.recv().await {
-            match cmd {
-                StreamCommand::Request(id, hash)
-                    => tokio::spawn(Self::request_hash(self.control.clone(), id, hash)),
-                StreamCommand::Await(id, hash)
-                    => tokio::spawn(Self::await_hash(self.control.clone(), id, hash))
-            };
-        }
-    }
-}
-
-struct StreamManagerHandle {
-    
-}
-*/

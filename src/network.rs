@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::event_loop::*;
 use crate::core::*;
+use crate::stream_manager::StreamRouterHandle;
+use crate::system::Hash;
 
 pub type EventStream = mpsc::Receiver<Event>;
 
@@ -95,10 +97,13 @@ pub(crate) async fn new(
     let (command_sender, command_receiver) = mpsc::channel(0);
     let (event_sender, event_receiver) = mpsc::channel(0);
 
+    let control = swarm.behaviour().data_stream.new_control();
+
     Ok((
         Client {
             keys: id_keys,
-            sender: command_sender
+            sender: command_sender,
+            streams: StreamRouterHandle::new(control)
         },
         event_receiver,
         EventLoop::new(swarm, command_receiver, event_sender),
@@ -108,7 +113,8 @@ pub(crate) async fn new(
 #[derive(Clone)]
 pub(crate) struct Client {
     keys: identity::Keypair,
-    sender: mpsc::Sender<Command>
+    sender: mpsc::Sender<Command>,
+    streams: StreamRouterHandle,
 }
 
 impl Client {
@@ -176,16 +182,16 @@ impl Client {
         receiver.await.expect("Sender not to be dropped.")
     }
 
-    /// Request the content of the given file from the given peer.
-    pub(crate) async fn request_file(
+    /// Send an object query
+    pub(crate) async fn send_query(
         &mut self,
         peer: PeerId,
-        object: ObjectId,
+        query: TypedObject,
     ) -> Result<SignedObject, Box<dyn Error + Send>> {
         let (sender, receiver) = oneshot::channel();
         let _ = self.sender
-            .send(Command::RequestObject {
-                object,
+            .send(Command::SendQuery {
+                query,
                 peer,
                 sender,
             })
@@ -193,14 +199,18 @@ impl Client {
         receiver.await.expect("Sender not be dropped.")
     }
 
-    /// Respond with the provided file content to the given request.
-    pub(crate) async fn respond_file(
+    /// Respond to an object query
+    pub(crate) async fn respond_query(
         &mut self,
         object: SignedObject,
         channel: ResponseChannel<ObjectResponse>,
     ) {
         let _ = self.sender
-            .send(Command::RespondObject { object, channel })
+            .send(Command::RespondQuery { object, channel })
             .await;
+    }
+
+    pub(crate) async fn open_stream(&mut self, hash: Hash, id: PeerId) {
+        //self.streams.open_stream(hash, id)
     }
 }

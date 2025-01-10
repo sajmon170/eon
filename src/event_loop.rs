@@ -32,7 +32,7 @@ pub(crate) struct EventLoop {
     pending_dial: HashMap<PeerId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
     pending_start_providing: HashMap<kad::QueryId, oneshot::Sender<()>>,
     pending_get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
-    pending_request_object:
+    pending_object_query:
         HashMap<OutboundRequestId, oneshot::Sender<Result<SignedObject, Box<dyn Error + Send>>>>,
     bootstrap_listener: Option<oneshot::Sender<()>>
 }
@@ -50,7 +50,7 @@ impl EventLoop {
             pending_dial: Default::default(),
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
-            pending_request_object: Default::default(),
+            pending_object_query: Default::default(),
             bootstrap_listener: Default::default()
         }
     }
@@ -148,8 +148,8 @@ impl EventLoop {
                     request, channel, ..
                 } => {
                     self.event_sender
-                        .send(Event::InboundRequest {
-                            request: request.0,
+                        .send(Event::InboundQuery {
+                            query: request.0,
                             channel,
                         })
                         .await
@@ -160,7 +160,7 @@ impl EventLoop {
                     response,
                 } => {
                     let _ = self
-                        .pending_request_object
+                        .pending_object_query
                         .remove(&request_id)
                         .expect("Request to still be pending.")
                         .send(Ok(response.0));
@@ -172,7 +172,7 @@ impl EventLoop {
                 },
             )) => {
                 let _ = self
-                    .pending_request_object
+                    .pending_object_query
                     .remove(&request_id)
                     .expect("Request to still be pending.")
                     .send(Err(Box::new(error)));
@@ -272,8 +272,8 @@ impl EventLoop {
                     .get_providers(Vec::from(object).into());
                 self.pending_get_providers.insert(query_id, sender);
             }
-            Command::RequestObject {
-                object,
+            Command::SendQuery {
+                query,
                 peer,
                 sender,
             } => {
@@ -281,10 +281,10 @@ impl EventLoop {
                     .swarm
                     .behaviour_mut()
                     .object_exchange
-                    .send_request(&peer, ObjectRequest(object));
-                self.pending_request_object.insert(request_id, sender);
+                    .send_request(&peer, ObjectQuery(query));
+                self.pending_object_query.insert(request_id, sender);
             }
-            Command::RespondObject { object, channel } => {
+            Command::RespondQuery { object, channel } => {
                 self.swarm
                     .behaviour_mut()
                     .object_exchange
@@ -297,7 +297,7 @@ impl EventLoop {
 
 #[derive(NetworkBehaviour)]
 pub(crate) struct Behaviour {
-    pub object_exchange: request_response::cbor::Behaviour<ObjectRequest, ObjectResponse>,
+    pub object_exchange: request_response::cbor::Behaviour<ObjectQuery, ObjectResponse>,
     pub data_stream: libp2p_stream::Behaviour,
     pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
     pub identify: identify::Behaviour
@@ -325,12 +325,12 @@ pub(crate) enum Command {
         object: ObjectId,
         sender: oneshot::Sender<HashSet<PeerId>>,
     },
-    RequestObject {
-        object: ObjectId,
+    SendQuery {
+        query: TypedObject,
         peer: PeerId,
         sender: oneshot::Sender<Result<SignedObject, Box<dyn Error + Send>>>,
     },
-    RespondObject {
+    RespondQuery {
         object: SignedObject,
         channel: ResponseChannel<ObjectResponse>,
     },
@@ -338,14 +338,14 @@ pub(crate) enum Command {
 
 #[derive(Debug)]
 pub(crate) enum Event {
-    InboundRequest {
-        request: ObjectId,
+    InboundQuery {
+        query: TypedObject,
         channel: ResponseChannel<ObjectResponse>,
     },
 }
 
 // Simple file exchange protocol
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ObjectRequest(ObjectId);
+pub(crate) struct ObjectQuery(TypedObject);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ObjectResponse(SignedObject);

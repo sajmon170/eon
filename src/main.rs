@@ -6,9 +6,11 @@ mod repl;
 mod app_cli;
 mod app_controller;
 mod app_state;
+mod asymmetric_codec;
 
 mod system;
-mod parser;
+mod parsing;
+mod object_parser;
 mod minivault;
 mod pins;
 mod testing_obj;

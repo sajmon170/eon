@@ -42,12 +42,12 @@ impl AppController {
 
     async fn handle_event(&mut self, event: Event) -> Result<(), Box<dyn Error>> {
         match event {
-            event_loop::Event::InboundRequest { request, channel } => {
+            event_loop::Event::InboundQuery { query, channel } => {
                 event!(Level::INFO, "Responding to request.");
 
-                if let Some(object) = self.state.get(request).await {
+                if let Some(object) = self.state.query(query).await {
                     self.network_client
-                        .respond_file(object, channel)
+                        .respond_query(object, channel)
                         .await;
                 }
             }

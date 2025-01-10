@@ -1,4 +1,5 @@
 use crate::core::*;
+use crate::parsing::*;
 use serde::{Serialize, Deserialize};
 use heck::AsTitleCase;
 use uuid::{Uuid, uuid};
@@ -50,6 +51,8 @@ impl Typed for Poem {
     const UUID: Uuid = uuid!("d630cef4-b8e2-4c96-823b-28df2445818a");
 }
 
+impl Parsable for Poem { }
+
 #[derive(Serialize, Deserialize)]
 pub struct BinaryFile {
     pub filename: String,
@@ -59,6 +62,8 @@ pub struct BinaryFile {
 impl Typed for BinaryFile {
     const UUID: Uuid = uuid!("d5003cdd-1076-4554-b195-b6907207afca");
 }
+
+impl Parsable for BinaryFile { }
 
 impl BinaryFile {
     // TODO - handle errors

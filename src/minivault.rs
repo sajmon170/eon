@@ -3,52 +3,22 @@ use crate::core::*;
 use crate::pins::*;
 use crate::testing_obj::*;
 use crate::system::{hash_str, self};
+use uuid::Uuid;
+use std::any::Any;
 
 use tracing::info;
 
 #[derive(Default)]
 pub struct SystemDatabase {
-    pub objects: HashMap<ObjectId, SignedObject>,
-    pub pins: Vec<FlatPin>,
-    pub tags: HashMap<TagId, Tag>,
-    pub tag_mapping: HashMap<ObjectId, Vec<TagId>>,
-    // These ObjectIds MUST be stored inside the objects hashmap.
-    pub poems: Vec<ObjectId>,
-    pub files: Vec<ObjectId>
+    objects: HashMap<ObjectId, SignedObject>,
+    bindings: HashMap<Uuid, Vec<ObjectId>>,
+    tables: HashMap<Uuid, Box<dyn CustomDatabase>>,
+    pending_queries: HashMap<ObjectId, Vec<ObjectId>>
 }
 
 impl SystemDatabase {
     pub fn new() -> Self {
         Self::default()
-    }
-    
-    pub fn add_tag(&mut self, obj_id: ObjectId, tag: Tag) {
-        info!("Added a tag: \"{tag}\" ([{}])", hash_str(&obj_id));
-        self.tags.insert(obj_id, tag);
-    }
-
-    pub fn tag_object(&mut self, obj_id: ObjectId, tag_id: TagId) {
-        info!("Tagged [{}] with [{}]", hash_str(&obj_id), hash_str(&tag_id));
-        self.tag_mapping
-            .entry(obj_id)
-            .or_insert(Vec::new())
-            .push(tag_id);
-    }
-
-    pub fn add_pin(&mut self, pin: FlatPin) {
-        info!("Added a pin.");
-        self.pins
-            .push(pin);
-    }
-
-    pub fn add_poem(&mut self, obj_id: ObjectId) {
-        info!("Added a poem [{}]:", hash_str(&obj_id));
-        self.poems.push(obj_id);
-    }
-
-    pub fn add_file(&mut self, obj_id: ObjectId) {
-        info!("Added a file [{}]:", hash_str(&obj_id));
-        self.files.push(obj_id);
     }
 
     pub fn add_object(&mut self, obj: SignedObject) {
@@ -56,13 +26,81 @@ impl SystemDatabase {
         self.objects.insert(obj.get_object_id(), obj);
     }
 
-    pub fn get_file(&mut self, obj_id: ObjectId) -> Option<BinaryFile> {
-        if self.files.contains(&obj_id) {
-            let obj = self.objects.get(&obj_id).unwrap();
-            Some(system::deserialize::<BinaryFile>(obj.get_data()))
+    pub fn get_object(&self, id: &ObjectId) -> Option<&SignedObject> {
+        self.objects.get(id)
+    }
+
+    pub fn delete_object(&mut self, id: &ObjectId) {
+        self.objects.remove(id);
+
+        for (_, mut objects) in &mut self.bindings {
+            objects.retain(|obj| obj != id);
         }
-        else {
-            None
+
+        for (_, mut table) in &mut self.tables {
+            table.cleanup_id(id);
         }
+    }
+
+    pub fn add_binding(&mut self, uuid: Uuid, id: ObjectId) {
+        self.bindings
+            .entry(uuid)
+            .or_default()
+            .push(id);
+    }
+
+    pub fn get_bindings(&mut self, uuid: Uuid) -> &Vec<ObjectId> {
+        self.bindings
+            .entry(uuid)
+            .or_default()
+    }
+
+    pub fn get_table(&mut self, uuid: &Uuid) -> Option<&mut Box<dyn CustomDatabase>> {
+        self.tables
+            .get_mut(&uuid)
+    }
+
+    pub fn insert_table(&mut self, uuid: Uuid, table: Box<dyn CustomDatabase>) {
+        self.tables.insert(uuid, table);
+    }
+
+    pub fn initialize_query(&mut self, id: &ObjectId, init: Vec<ObjectId>) {
+        self.pending_queries.insert(*id, init);
+    }
+    
+    pub fn get_query(&mut self, id: &ObjectId) -> &mut Vec<ObjectId> {
+        self.pending_queries
+            .entry(*id)
+            .or_insert(self.objects.keys().cloned().collect())
+    }
+
+    pub fn finish_query(&mut self, id: &ObjectId) -> Option<Vec<ObjectId>> {
+        self.pending_queries.remove(id)
+    }
+
+    pub fn contains(&mut self, id: &ObjectId) -> bool {
+        self.objects.contains_key(id)
+    }
+}
+
+pub trait CustomDatabase: AsAny {
+    fn cleanup_id(&mut self, id: &ObjectId) { }
+}
+
+pub trait AsAny {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+impl<T> AsAny for T
+where
+    T: 'static,
+{
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

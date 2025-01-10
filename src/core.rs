@@ -31,6 +31,14 @@ impl TypedObject {
             signature
         })
     }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        system::serialize(self)
+    }
+
+    pub fn get_object_id(&self) -> ObjectId {
+        system::hash(self.serialize()).into()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
