@@ -199,7 +199,7 @@ impl Client {
         receiver.await.expect("Sender not be dropped.")
     }
 
-    /// Respond to an object query
+    /// Respond to an object RPC
     pub(crate) async fn respond_rpc(
         &mut self,
         response: Vec<SignedObject>,
