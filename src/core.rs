@@ -2,6 +2,8 @@ use crate::system;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use uuid::{Uuid, uuid};
 use libp2p::identity::{Keypair, PublicKey, SigningError};
+// TODO - replace this with a proper error
+use anyhow::anyhow;
 
 pub type ObjectId = [u8; 32];
 pub type Signature = Vec<u8>;
@@ -16,6 +18,27 @@ pub trait Typed: Serialize + DeserializeOwned {
         }
     }
 }
+
+impl<T: Typed> From<T> for TypedObject {
+    fn from(value: T) -> Self {
+        value.make_typed()
+    }
+}
+
+/*
+impl<T: Typed> TryFrom<TypedObject> for T {
+    type Error = anyhow::Error;
+
+    fn try_from(value: TypedObject) -> Result<Self, Self::Error> {
+        if value.uuid == Self::UUID {
+            Ok(system::deserialize::<Self>(&value.data))
+        }
+        else {
+            Err(anyhow!("Wrong UUID"))
+        }
+    }
+}
+*/
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypedObject {

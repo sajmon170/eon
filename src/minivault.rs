@@ -83,7 +83,7 @@ impl SystemDatabase {
     }
 }
 
-pub trait CustomDatabase: AsAny {
+pub trait CustomDatabase: AsAny + Send + Sync {
     fn cleanup_id(&mut self, id: &ObjectId) { }
 }
 

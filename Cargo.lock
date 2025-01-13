@@ -1527,6 +1527,7 @@ dependencies = [
  "anyhow",
  "base64",
  "blake3",
+ "bytes",
  "clap",
  "dirs",
  "futures",

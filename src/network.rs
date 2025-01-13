@@ -182,16 +182,16 @@ impl Client {
         receiver.await.expect("Sender not to be dropped.")
     }
 
-    /// Send an object query
-    pub(crate) async fn send_query(
+    /// Send an object RPC
+    pub(crate) async fn send_rpc(
         &mut self,
         peer: PeerId,
-        query: TypedObject,
-    ) -> Result<SignedObject, Box<dyn Error + Send>> {
+        rpc: TypedObject,
+    ) -> Result<Vec<SignedObject>, Box<dyn Error + Send>> {
         let (sender, receiver) = oneshot::channel();
         let _ = self.sender
-            .send(Command::SendQuery {
-                query,
+            .send(Command::SendRpc {
+                rpc,
                 peer,
                 sender,
             })
@@ -200,13 +200,13 @@ impl Client {
     }
 
     /// Respond to an object query
-    pub(crate) async fn respond_query(
+    pub(crate) async fn respond_rpc(
         &mut self,
-        object: SignedObject,
+        response: Vec<SignedObject>,
         channel: ResponseChannel<ObjectResponse>,
     ) {
         let _ = self.sender
-            .send(Command::RespondQuery { object, channel })
+            .send(Command::RespondRpc { response, channel })
             .await;
     }
 

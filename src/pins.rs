@@ -27,7 +27,10 @@ impl Parsable for PinObject {
         
         ParsingResult::new(included).into()
     }
-    
+
+    fn maybe_custom_db() -> Option<Box<dyn CustomDatabase>> {
+        Some(Box::new(Self::init_custom_db()))
+    }
 }
 
 #[derive(Default)]
@@ -87,22 +90,27 @@ impl PinObject {
 }
 
 #[derive(Serialize, Deserialize)]
-struct PinnedWith(ObjectId);
+pub struct PinnedWith(ObjectId);
 
 impl Typed for PinnedWith {
     const UUID: Uuid = uuid!("14810393-ecc4-437e-bfc5-ad2657d9eb60");
 }
 
 impl Query for PinnedWith {
-    fn parse(db: &mut SystemDatabase, id: ObjectId, query: Self) -> Option<QueryResult> {
-        let pin_db = PinObject::extract_custom_db(db).unwrap();
-        let pinned = pin_db.get_pinned(&id);
-        
-        db.get_query(&id)
+    fn parse(parser: &mut ObjectParser, id: ObjectId, query: Self) -> Vec<ObjectId> {
+        let pin_db = PinObject::extract_custom_db(&mut parser.db).unwrap();
+        let pinned = pin_db.get_pinned(&query.0);
+
+        parser.db.get_query(&id)
             .retain(|id| pinned.contains(&id));
 
-        db.finish_query(&id)
-            .map(|result| QueryResult::Return(result))
+        parser.db.finish_query(&id).unwrap_or_default()
+    }
+}
+
+impl PinnedWith {
+    pub fn new(id: ObjectId) -> Self {
+        Self(id)
     }
 }
 

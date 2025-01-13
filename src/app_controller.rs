@@ -15,6 +15,7 @@ use tracing::{Level, event};
 use anyhow::Result;
 use base64::prelude::*;
 use crate::system;
+use crate::parsing::*;
 
 use crate::network::EventStream;
 
@@ -42,12 +43,12 @@ impl AppController {
 
     async fn handle_event(&mut self, event: Event) -> Result<(), Box<dyn Error>> {
         match event {
-            event_loop::Event::InboundQuery { query, channel } => {
+            event_loop::Event::InboundRpc { rpc, channel } => {
                 event!(Level::INFO, "Responding to request.");
 
-                if let Some(object) = self.state.query(query).await {
+                if let Some(objects) = self.state.rpc(rpc).await {
                     self.network_client
-                        .respond_query(object, channel)
+                        .respond_rpc(objects, channel)
                         .await;
                 }
             }
@@ -83,15 +84,19 @@ impl AppController {
                 let requests = providers.into_iter().map(|p| {
                     event!(Level::INFO, "Found provider: {p}");
                     let mut network_client = self.network_client.clone();
-                    async move { network_client.request_file(p, id).await }.boxed()
+
+                    let rpc = GetObject::new(id).make_typed();
+                    async move { network_client.send_rpc(p, rpc).await }.boxed()
                 });
 
-                let file_content = futures::future::select_ok(requests)
+                let results = futures::future::select_ok(requests)
                     .await
                     .map_err(|_| "None of the providers returned file.")?
                     .0;
 
-                let file = system::deserialize::<BinaryFile>(file_content.get_data());
+                let file = results.into_iter().filter(|file| file.get_object_id() == id).next().unwrap();
+                let file = system::deserialize::<BinaryFile>(&file.get_data());
+
                 let path = dirs::download_dir().unwrap();
                 println!("Saving {} to {}", file.filename, path.as_os_str().to_str().unwrap());
                 file.save(&path);

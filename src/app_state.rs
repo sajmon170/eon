@@ -1,12 +1,13 @@
 use crate::object_parser::*;
-use crate::pins::{PinObject, Tag};
+use crate::pins::*;
 use crate::testing_obj::{Poem, BinaryFile};
 use crate::core::*;
+use crate::parsing::*;
 use tokio::{sync::{mpsc, oneshot}, task::spawn};
 
 enum DataMessage {
     StoreObject(SignedObject),
-    QueryObject(TypedObject, oneshot::Sender<Option<SignedObject>>)
+    RpcObject(TypedObject, oneshot::Sender<Option<Vec<SignedObject>>>)
 }
 
 struct AppState {
@@ -18,18 +19,22 @@ impl AppState {
     async fn run(&mut self) {
         while let Some(request) = self.rx.recv().await {
             match request {
-                DataMessage::QueryObject(query, sender) => self.get_object(id, sender),
+                DataMessage::RpcObject(rpc, sender) => self.parse_rpc(rpc, sender),
                 DataMessage::StoreObject(obj) => self.add_object(obj)
             }
         }
     }
 
+    fn parse_rpc(&mut self, rpc: TypedObject, sender: oneshot::Sender<Option<Vec<SignedObject>>>) {
+        let _ = sender.send(self.parser.parse_rpc(rpc));
+    }
+
     fn get_object(&self, id: ObjectId, sender: oneshot::Sender<Option<SignedObject>>) {
-        let _ = sender.send(self.state.get_object(id));
+        let _ = sender.send(self.parser.get_object(id));
     }
 
     fn add_object(&mut self, obj: SignedObject) {
-        self.state.parse_object(obj);
+        self.parser.parse_object(obj);
     }
 }
 
@@ -41,22 +46,31 @@ impl AppStateHandle {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel(32);
 
-        let mut state = SystemState::new();
-        state.register_parser::<BinaryFile>();
-        state.register_parser::<PinObject>();
-        state.register_parser::<Poem>();
-        state.register_parser::<Tag>();
-        
-        let mut state = AppState { state, rx };
+        let mut parser = ObjectParser::new();
 
-        spawn(async move { state.run().await; });
+        parser.register_object_parser::<BinaryFile>();
+        parser.register_object_parser::<PinObject>();
+        parser.register_object_parser::<Poem>();
+        parser.register_object_parser::<Tag>();
+        parser.register_rpc_parser::<StoreObject>();
+        parser.register_rpc_parser::<DeleteObject>();
+        parser.register_rpc_parser::<GetObject>();
+        parser.register_query_parser::<CompositeQuery>();
+        parser.register_query_parser::<WithUuid>();
+        parser.register_query_parser::<PinnedWith>();
+
+        let mut state = AppState { parser, rx };
+
+        spawn(async move {
+            state.run().await;
+        });
 
         Self { tx }
     }
 
-    pub async fn query(&mut self, query: TypedObject) -> Option<SignedObject> {
+    pub async fn rpc(&mut self, rpc: TypedObject) -> Option<Vec<SignedObject>> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.tx.send(DataMessage::QueryObject(query, tx)).await;
+        let _ = self.tx.send(DataMessage::RpcObject(rpc, tx)).await;
         rx.await.unwrap()
     }
 
