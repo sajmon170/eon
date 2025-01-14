@@ -1,10 +1,10 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use uuid::{Uuid, uuid};
-use crate::core::*;
-use crate::parsing::*;
-use std::collections::HashMap;
 
-pub type TagId = ObjectId;
+use crate::core::object::*;
+use crate::core::query::*;
+use crate::storage::database::{SystemDatabase, CustomDatabase};
+use crate::storage::object_parser::ObjectParser;
 
 #[derive(Serialize, Deserialize)]
 pub struct PinObject {
@@ -17,7 +17,7 @@ impl Typed for PinObject {
 }
 
 impl Parsable for PinObject {
-    fn parse(db: &mut SystemDatabase, id: ObjectId, pin: Self) -> Option<ParsingResult> {
+    fn parse(db: &mut SystemDatabase, _id: ObjectId, pin: Self) -> Option<ParsingResult> {
         let flattened = pin.flatten();
 
         Self::extract_custom_db(db).unwrap()

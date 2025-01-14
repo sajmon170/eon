@@ -1,14 +1,16 @@
-use crate::event_loop::{Event, self};
-use crate::network::Client;
 use futures::prelude::*;
-use crate::CliArgument;
-use crate::repl::*;
-use crate::app_controller::*;
-use crate::network::EventStream;
 use std::io::prelude::*;
 
-use std::error::Error;
+use crate::{
+    app::{controller::*, repl::*},
+    net::{
+        event_loop::{self, Event},
+        network::{Client, EventStream},
+    },
+    CliArgument,
+};
 
+use std::error::Error;
 use anyhow::Result;
 
 pub struct AppCli {
@@ -18,14 +20,14 @@ pub struct AppCli {
 impl AppCli {
     pub fn new(network_client: Client, events: EventStream) -> Self {
         Self {
-            controller: AppControllerHandle::new(network_client, events)
+            controller: AppControllerHandle::new(network_client, events),
         }
     }
-    
+
     pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
         let mut is_running = true;
         let mut line = String::new();
-        
+
         while is_running {
             print!("?> ");
             std::io::stdout().flush().unwrap();

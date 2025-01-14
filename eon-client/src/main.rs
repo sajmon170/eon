@@ -1,20 +1,6 @@
 #![allow(dead_code, unused)]
-mod network;
-mod event_loop;
-mod stream_manager;
-mod repl;
-mod app_cli;
-mod app_controller;
-mod app_state;
-mod asymmetric_codec;
-
-mod system;
-mod parsing;
-mod object_parser;
-mod minivault;
-mod pins;
-mod testing_obj;
-mod core;
+mod app;
+mod net;
 
 use std::{error::Error, io::Write, path::PathBuf, fs::File};
 
@@ -26,7 +12,8 @@ use tracing_subscriber::EnvFilter;
 use tracing_appender::{non_blocking, non_blocking::WorkerGuard};
 use tracing::{Level, event};
 use anyhow::Result;
-//use network_manager::NetworkManager;
+
+use crate::{net::network, app::cli::AppCli};
 
 fn init_tracing(name: &str) -> Result<WorkerGuard> {
     let file = File::create(format!("{name}.log"))?;
@@ -103,7 +90,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         event!(Level::INFO, "Finished bootstrapping.");
     }
 
-    let mut app = app_cli::AppCli::new(network_client, network_events);
+    let mut app = AppCli::new(network_client, network_events);
     app.run().await?;
 
     Ok(())

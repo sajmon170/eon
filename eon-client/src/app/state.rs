@@ -1,9 +1,5 @@
-use crate::object_parser::*;
-use crate::pins::*;
-use crate::testing_obj::{Poem, BinaryFile};
-use crate::core::*;
-use crate::parsing::*;
 use tokio::{sync::{mpsc, oneshot}, task::spawn};
+use objects::prelude::*;
 
 enum DataMessage {
     StoreObject(SignedObject),

@@ -1,8 +1,5 @@
 use std::collections::HashMap;
-use crate::core::*;
-use crate::pins::*;
-use crate::testing_obj::*;
-use crate::system::{hash_str, self};
+use crate::core::object::*;
 use uuid::Uuid;
 use std::any::Any;
 
@@ -33,11 +30,11 @@ impl SystemDatabase {
     pub fn delete_object(&mut self, id: &ObjectId) {
         self.objects.remove(id);
 
-        for (_, mut objects) in &mut self.bindings {
+        for (_, objects) in &mut self.bindings {
             objects.retain(|obj| obj != id);
         }
 
-        for (_, mut table) in &mut self.tables {
+        for (_, table) in &mut self.tables {
             table.cleanup_id(id);
         }
     }
@@ -84,7 +81,7 @@ impl SystemDatabase {
 }
 
 pub trait CustomDatabase: AsAny + Send + Sync {
-    fn cleanup_id(&mut self, id: &ObjectId) { }
+    fn cleanup_id(&mut self, _id: &ObjectId) { }
 }
 
 pub trait AsAny {

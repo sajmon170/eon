@@ -1,0 +1,23 @@
+[package]
+name = "objects"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "GPL-3.0-only"
+
+[package.metadata.release]
+release = false
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+uuid = { version = "1.11.0", features = ["serde"] }
+postcard = { version = "1.1.1", features = ["alloc"] }
+heck = "0.5.0"
+base64 = "0.22.1"
+blake3 = { version = "1.5.5", features = ["serde"] }
+anyhow = "1.0.95"
+tracing-appender = "0.2.3"
+tracing = "0.1.41"
+bytes = "1.9.0"
+libp2p-identity = "0.2.10"

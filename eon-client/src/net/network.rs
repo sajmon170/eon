@@ -21,10 +21,11 @@ use libp2p::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::event_loop::*;
-use crate::core::*;
-use crate::stream_manager::StreamRouterHandle;
-use crate::system::Hash;
+use crate::net::{event_loop::*, stream_manager::StreamRouterHandle};
+
+use objects::prelude::*;
+use objects::system;
+use objects::system::Hash;
 
 pub type EventStream = mpsc::Receiver<Event>;
 

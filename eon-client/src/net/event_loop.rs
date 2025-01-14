@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use tracing::{Level, event};
 
-use crate::core::*;
+use objects::prelude::*;
 
 pub(crate) struct EventLoop {
     swarm: Swarm<Behaviour>,
