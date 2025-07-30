@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "eon-client",
+    "eon-client", "libp2p-scaffolding",
     "objects"
 ]
