@@ -3,4 +3,4 @@ resolver = "2"
 members = [
     "eon-client", "libp2p-scaffolding",
     "objects"
-]
+, "testing"]
