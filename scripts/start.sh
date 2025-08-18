@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 cargo run -- --secret-key-seed 2 \
 		 provide \

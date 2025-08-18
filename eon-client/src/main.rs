@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     event!(Level::INFO, "Hello.");
 
-    let (mut network_client, mut network_events, network_event_loop) =
+    let (mut network_client, network_events, network_event_loop) =
         network::new(keypair, opt.bootstrap_mode).await?;
 
     // Spawn the network task for it to run in the background.

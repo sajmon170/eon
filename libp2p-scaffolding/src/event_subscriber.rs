@@ -6,22 +6,10 @@ use quote::{quote, ToTokens, TokenStreamExt};
 use crate::tools;
 
 pub fn impl_event_subscriber(mut ast: syn::ItemImpl) -> TokenStream {
-    /*
-    let mut command_items = Vec::new();
-    
-    while let Some(syn::ImplItem::Fn(func)) = ast.items.iter().next() {
-        parse_fn(func);
-        command_items.push(tools::enum_case(&func.sig.ident));
-    }
-    
-    quote! {
-        enum Command {
-            #(#command_items),*
-        }
-    }
-    */
     let mut visitor = SubscriberVisitor::default();
     visitor.visit_item_impl_mut(&mut ast);
+    let event_loop = visitor.event_loop;
+    println!("{}", stringify(&event_loop));
     quote!(#ast)
 }
 
@@ -58,27 +46,23 @@ impl ToTokens for SubscribeQueue {
 #[derive(syn_derive::Parse)]
 struct SubscribeInvocation {
     query_id: syn::Ident,
-    colon_token: Token![:],
+    _colon_token: Token![:],
     query_type: syn::Type,
-    fat_arrow_token: Token![=>],
+    _fat_arrow_token: Token![=>],
     pattern: EventLoopPattern
 }
 
 struct EventLoopPattern {
     query_key: syn::Member,
-    pattern: syn::PatStruct
+    pattern: syn::Pat
 }
 
 impl Parse for EventLoopPattern {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
-        let parsed = syn::Pat::parse_single(input)?;
-        let syn::Pat::Struct(mut pattern) = parsed else {
-            return Err(input.error("Not a struct pattern"));
-        };
-        
+        let mut pattern = syn::Pat::parse_single(input)?;
         let mut visitor = PatternVisitor::default();
 
-        visitor.visit_pat_struct_mut(&mut pattern);
+        visitor.visit_pat_mut(&mut pattern);
         let key_no = visitor.keys.len();
         if key_no != 1 {
             return Err(input.error(format!(
@@ -113,15 +97,32 @@ impl VisitMut for PatternVisitor {
     }
 }
 
+#[derive(Default)]
 struct EventLoop {
-    queues: Vec<SubscribeQueue> 
+    queues: Vec<SubscribeQueue>
+}
+
+impl ToTokens for EventLoop {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let command_items: Vec<syn::Ident> = self.queues
+            .iter()
+            .map(|queue| tools::enum_case(&queue.name))
+            .collect();
+        
+        tokens.append_all(quote! {
+            enum Command {
+                #(#command_items),*
+            }
+        });
+    }
 }
 
 // This should be used as a field inside another structure
 // because we need to output all macro occurances us our domain-specific structs
 #[derive(Default)]
 struct SubscriberVisitor {
-    current_fn: Option<syn::Ident>
+    current_fn: Option<syn::Ident>,
+    event_loop: EventLoop
 }
 
 impl VisitMut for SubscriberVisitor {
@@ -139,6 +140,7 @@ impl VisitMut for SubscriberVisitor {
                 let context = self.current_fn.as_ref().unwrap().clone();
                 let queue = SubscribeQueue::new(context, invocation);
                 *expr = parse_quote!(#queue);
+                self.event_loop.queues.push(queue);
             }
         }
         visit_mut::visit_expr_mut(self, node);
