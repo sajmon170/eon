@@ -189,11 +189,19 @@ impl Client {
 
     /// Advertise the local node as the provider of the given file on the DHT.
     pub(crate) async fn start_providing(&mut self, object: ObjectId) {
-        let (sender, receiver) = oneshot::channel();
-        let _ = self.sender
-            .send(Command::StartProviding { object, sender })
-            .await;
-        receiver.await.expect("Sender not to be dropped.");
+        let query_id = self.register(move |swarm| {
+            swarm
+                .behaviour_mut()
+                .kademlia
+                .start_providing(Vec::from(object).into())
+                .expect("No store error.")
+        }).await.unwrap();
+
+        let rx = self.add_pending(move |db, sender| {
+            db.start_providing.insert(query_id, sender);
+        }).await;
+
+        rx.await.unwrap();
     }
 
     /// Find the providers for the given file on the DHT.

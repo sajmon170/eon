@@ -265,15 +265,6 @@ impl EventLoop {
                     todo!("Already dialing peer.");
                 }
             }
-            Command::StartProviding { object, sender } => {
-                let query_id = self
-                    .swarm
-                    .behaviour_mut()
-                    .kademlia
-                    .start_providing(Vec::from(object).into())
-                    .expect("No store error.");
-                self.pending.start_providing.insert(query_id, sender);
-            }
         }
     }
 }
@@ -299,10 +290,6 @@ pub(crate) enum Command {
         peer_id: PeerId,
         peer_addr: Multiaddr,
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
-    },
-    StartProviding {
-        object: ObjectId,
-        sender: oneshot::Sender<()>,
     },
 }
 
