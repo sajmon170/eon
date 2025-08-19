@@ -13,6 +13,7 @@ use libp2p::{
     core::Multiaddr, identify, identity, kad, multiaddr::Protocol, noise, request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel}, swarm::{self, NetworkBehaviour, Swarm, SwarmEvent}, tcp, yamux, PeerId, StreamProtocol
 };
 use serde::{Deserialize, Serialize};
+use tracing::{event, Level};
 
 use crate::net::{event_loop::*, stream_manager::StreamRouterHandle};
 
@@ -123,7 +124,7 @@ impl Client {
         self.fn_sender.send(Box::new(move |swarm| {
             let output = func(swarm);
             let _ = tx.send(output);
-        }));
+        })).await;
 
         rx.await
     }
@@ -215,9 +216,13 @@ impl Client {
         response: Vec<SignedObject>,
         channel: ResponseChannel<ObjectResponse>,
     ) {
-        let _ = self.sender
-            .send(Command::RespondRpc { response, channel })
-            .await;
+        let _ = self.register(move |swarm| {
+            swarm
+                .behaviour_mut()
+                .object_exchange
+                .send_response(channel, ObjectResponse(response))
+                .expect("Connection to peer to be still open.");
+        }).await;
     }
 
     pub(crate) async fn open_stream(&mut self, hash: Hash, id: PeerId) {

@@ -62,13 +62,13 @@ impl EventLoop {
     pub(crate) async fn run(mut self) {
         loop {
             tokio::select! {
-                Some(event) = self.swarm.next() => self.handle_event(event).await,
+                event = self.swarm.select_next_some() => self.handle_event(event).await,
                 command = self.command_receiver.next() => match command {
                     Some(c) => self.handle_command(c).await,
                     // Command channel closed, thus shutting down the network event loop.
                     None=>  return,
                 },
-                Some(func) = self.fn_receiver.next() => func(&mut self.swarm)
+                func = self.fn_receiver.select_next_some() => func(&mut self.swarm)
             }
         }
     }
@@ -353,4 +353,4 @@ pub(crate) enum Event {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ObjectRpc(TypedObject);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ObjectResponse(Vec<SignedObject>);
+pub(crate) struct ObjectResponse(pub Vec<SignedObject>);
