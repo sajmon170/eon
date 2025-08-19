@@ -40,7 +40,6 @@ pub(crate) struct PendingQueries {
 pub(crate) struct EventLoop {
     pub swarm: Swarm<Behaviour>,
     pub pending: PendingQueries,
-    command_receiver: mpsc::Receiver<Command>,
     fn_receiver: mpsc::Receiver<EventLoopFn>,
     event_sender: mpsc::Sender<Event>
 }
@@ -48,13 +47,11 @@ pub(crate) struct EventLoop {
 impl EventLoop {
     pub fn new(
         swarm: Swarm<Behaviour>,
-        command_receiver: mpsc::Receiver<Command>,
         event_sender: mpsc::Sender<Event>,
         fn_receiver: mpsc::Receiver<EventLoopFn>
     ) -> Self {
         Self {
             swarm,
-            command_receiver,
             event_sender,
             fn_receiver,
             pending: Default::default()
@@ -65,11 +62,6 @@ impl EventLoop {
         loop {
             tokio::select! {
                 event = self.swarm.select_next_some() => self.handle_event(event).await,
-                command = self.command_receiver.next() => match command {
-                    Some(c) => self.handle_command(c).await,
-                    // Command channel closed, thus shutting down the network event loop.
-                    None=>  return,
-                },
                 func = self.fn_receiver.select_next_some() => func(&mut self)
             }
         }
@@ -231,14 +223,6 @@ impl EventLoop {
             _ => {}
         }
     }
-
-    async fn handle_command(&mut self, command: Command) {
-        match command {
-            Command::NotifyAfterBootstrap { sender } => {
-                self.pending.bootstrap_listener = Some(sender);
-            }
-        }
-    }
 }
 
 #[derive(NetworkBehaviour)]
@@ -247,13 +231,6 @@ pub(crate) struct Behaviour {
     pub data_stream: libp2p_stream::Behaviour,
     pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
     pub identify: identify::Behaviour
-}
-
-#[derive(Debug)]
-pub(crate) enum Command {
-    NotifyAfterBootstrap {
-        sender: oneshot::Sender<()>
-    },
 }
 
 #[derive(Debug)]

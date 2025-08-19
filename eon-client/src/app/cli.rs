@@ -24,7 +24,7 @@ impl AppCli {
         }
     }
 
-    pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn run(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut is_running = true;
         let mut line = String::new();
 

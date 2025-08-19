@@ -44,7 +44,7 @@ fn get_keypair(secret_key_seed: Option<u8>) -> Keypair {
 
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let opt = Opt::parse();
 
     let keypair = get_keypair(opt.secret_key_seed);

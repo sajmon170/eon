@@ -33,7 +33,7 @@ pub type EventStream = mpsc::Receiver<Event>;
 pub(crate) async fn new(
     id_keys: identity::Keypair,
     is_bootstrap: bool
-) -> Result<(Client, EventStream, EventLoop), Box<dyn Error>> {
+) -> Result<(Client, EventStream, EventLoop), Box<dyn Error + Send + Sync>> {
     let peer_id = id_keys.public().to_peer_id();
     
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys.clone())
@@ -89,7 +89,6 @@ pub(crate) async fn new(
 
     println!("Started node");
 
-    let (command_sender, command_receiver) = mpsc::channel(0);
     let (event_sender, event_receiver) = mpsc::channel(0);
     let (fn_sender, fn_receiver) = mpsc::channel(0);
 
@@ -98,19 +97,17 @@ pub(crate) async fn new(
     Ok((
         Client {
             keys: id_keys,
-            sender: command_sender,
             streams: StreamRouterHandle::new(control),
             fn_sender
         },
         event_receiver,
-        EventLoop::new(swarm, command_receiver, event_sender, fn_receiver),
+        EventLoop::new(swarm, event_sender, fn_receiver),
     ))
 }
 
 #[derive(Clone)]
 pub(crate) struct Client {
     keys: identity::Keypair,
-    sender: mpsc::Sender<Command>,
     streams: StreamRouterHandle,
     fn_sender: mpsc::Sender<EventLoopFn>
 }
@@ -141,14 +138,12 @@ impl Client {
         rx
     }
     
-    pub(crate) async fn bootstrap(&mut self) -> Result<(), Box<dyn Error>> {
-        let (sender, receiver) = oneshot::channel::<()>();
+    pub(crate) async fn bootstrap(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let rx = self.add_pending(move |db, sender| {
+            db.bootstrap_listener = Some(sender);
+        }).await;
 
-        let _ = self.sender
-            .send(Command::NotifyAfterBootstrap { sender })
-            .await;
-
-        receiver.await.unwrap();
+        rx.await?;
 
         Ok(())
     }
