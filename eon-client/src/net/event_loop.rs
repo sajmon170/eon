@@ -274,14 +274,6 @@ impl EventLoop {
                     .expect("No store error.");
                 self.pending.start_providing.insert(query_id, sender);
             }
-            Command::GetProviders { object, sender } => {
-                let query_id = self
-                    .swarm
-                    .behaviour_mut()
-                    .kademlia
-                    .get_providers(Vec::from(object).into());
-                self.pending.get_providers.insert(query_id, sender);
-            }
         }
     }
 }
@@ -311,10 +303,6 @@ pub(crate) enum Command {
     StartProviding {
         object: ObjectId,
         sender: oneshot::Sender<()>,
-    },
-    GetProviders {
-        object: ObjectId,
-        sender: oneshot::Sender<HashSet<PeerId>>,
     },
 }
 

@@ -198,11 +198,18 @@ impl Client {
 
     /// Find the providers for the given file on the DHT.
     pub(crate) async fn get_providers(&mut self, object: ObjectId) -> HashSet<PeerId> {
-        let (sender, receiver) = oneshot::channel();
-        let _ = self.sender
-            .send(Command::GetProviders { object, sender })
-            .await;
-        receiver.await.expect("Sender not to be dropped.")
+        let query_id = self.register(move |swarm| {
+            swarm
+                .behaviour_mut()
+                .kademlia
+                .get_providers(Vec::from(object).into())
+        }).await.unwrap();
+
+        let rx = self.add_pending(move |db, sender| {
+            db.get_providers.insert(query_id, sender);
+        }).await;
+
+        rx.await.unwrap()
     }
 
     /// Send an object RPC
