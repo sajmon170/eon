@@ -5,7 +5,7 @@ struct Test;
 #[derive(Debug)]
 struct QueryId;
 
-#[event_subscriber]
+#[event_subscriber(MyBehaviour)]
 impl Test {
     fn testing() {
         let x = vec![1, 2, 3];

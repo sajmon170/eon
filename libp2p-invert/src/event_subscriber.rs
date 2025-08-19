@@ -5,11 +5,12 @@ use syn::{
 use quote::{quote, ToTokens, TokenStreamExt};
 use crate::tools;
 
-pub fn impl_event_subscriber(mut ast: syn::ItemImpl) -> TokenStream {
+pub fn impl_event_subscriber(mut ast: syn::ItemImpl, name: syn::Ident) -> TokenStream {
     let mut visitor = SubscriberVisitor::default();
     visitor.visit_item_impl_mut(&mut ast);
     let event_loop = visitor.event_loop;
     println!("{}", stringify(&event_loop));
+    println!("{}", stringify(&name));
     quote!(#ast)
 }
 
@@ -31,6 +32,7 @@ fn stringify<T: ToTokens>(node: &T) -> String {
 
 impl ToTokens for SubscribeQueue {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        // This replaces the subscribe! macro inline
         let name = stringify(&self.name);
         let query_id = stringify(&self.invocation.query_id);
         let query_type = stringify(&self.invocation.query_type);
@@ -102,18 +104,97 @@ struct EventLoop {
     queues: Vec<SubscribeQueue>
 }
 
-impl ToTokens for EventLoop {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let command_items: Vec<syn::Ident> = self.queues
+impl EventLoop {
+    fn append_pending_queries_struct(&self, tokens: &mut TokenStream) {
+        let db_items = self.queues
             .iter()
-            .map(|queue| tools::enum_case(&queue.name))
-            .collect();
+            .map(|queue| tools::member_case(&queue.name));
+
+        let db_types = self.queues
+            .iter()
+            .map(|queue| &queue.invocation.query_type);
         
+        // TODO - make the behaviour generic
         tokens.append_all(quote! {
-            enum Command {
-                #(#command_items),*
+            #[derive(Default)]
+            pub(crate) struct PendingQueries {
+                #(pub #db_items: HashMap<#db_types, libp2p::swarm::SwarmEvent<Behaviour>>),*
             }
         });
+    }
+    
+    fn append_event_loop_struct(&self, tokens: &mut TokenStream) {
+        tokens.append_all(quote! {
+            pub(crate) struct EventLoop {
+                pub swarm: Swarm<Behaviour>,
+                pub pending: PendingQueries,
+                fn_receiver: mpsc::Receiver<EventLoopFn>,
+                event_sender: mpsc::Sender<Event>
+            }
+        })
+    }
+
+    fn append_event_loop_impl(&self, tokens: &mut TokenStream) {
+        let names = self.queues
+            .iter()
+            .map(|queue| tools::member_case(&queue.name));
+
+        let patterns = self.queues
+            .iter()
+            .map(|queue| &queue.invocation.pattern.pattern);
+        
+        let keys = self.queues
+            .iter()
+            .map(|queue| &queue.invocation.pattern.query_key);
+        
+        tokens.append_all(quote! {
+            impl EventLoop {
+                pub fn new(
+                    swarm: Swarm<Behaviour>,
+                    event_sender: mpsc::Sender<Event>,
+                    fn_receiver: mpsc::Receiver<EventLoopFn>
+                ) -> Self {
+                    Self {
+                        swarm,
+                        event_sender,
+                        fn_receiver,
+                        pending: Default::default()
+                    }
+                }
+
+                pub(crate) async fn run(mut self) {
+                    loop {
+                        tokio::select! {
+                            Some(event) = self.swarm.next() => self.handle_event(event).await,
+                            Some(func) = self.fn_receiver.next() => func(&mut self),
+                            else => return
+                        }
+                    }
+                }
+
+                async fn handle_event(&mut self, event: SwarmEvent<BehaviourEvent>) {
+                    match event {
+                        #(#patterns => {
+                            let sender = self
+                                .pending
+                                .#names
+                                .remove(&#keys)
+                                .unwrap();
+                            
+                            let _ = sender.send(event);
+                        })*
+                    }
+                }
+            }
+        });
+    }
+}
+
+impl ToTokens for EventLoop {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.append_pending_queries_struct(tokens);
+        self.append_event_loop_struct(tokens);
+        self.append_event_loop_impl(tokens);
     }
 }
 
