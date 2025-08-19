@@ -112,7 +112,7 @@ pub(crate) struct Client {
     keys: identity::Keypair,
     sender: mpsc::Sender<Command>,
     streams: StreamRouterHandle,
-    fn_sender: mpsc::Sender<SwarmFn>
+    fn_sender: mpsc::Sender<EventLoopFn>
 }
 
 impl Client {
@@ -121,9 +121,22 @@ impl Client {
         func: impl FnOnce(&mut Swarm<Behaviour>) -> T + Send + Sync + 'static
     ) -> Result<T, Canceled> {
         let (tx, rx) = oneshot::channel();
-        self.fn_sender.send(Box::new(move |swarm| {
-            let output = func(swarm);
+        self.fn_sender.send(Box::new(move |event_loop| {
+            let output = func(&mut event_loop.swarm);
             let _ = tx.send(output);
+        })).await;
+
+        rx.await
+    }
+
+    async fn add_pending(
+        &mut self,
+        func: impl FnOnce(&mut PendingQueries) + Send + Sync + 'static
+    ) -> Result<(), Canceled> {
+        let (tx, rx) = oneshot::channel();
+        self.fn_sender.send(Box::new(move |event_loop| {
+            func(&mut event_loop.pending);
+            let _ = tx.send(());
         })).await;
 
         rx.await

@@ -25,18 +25,24 @@ pub enum SwarmOutput {
 }
 
 pub type SwarmFn = Box<dyn FnOnce(&mut Swarm<Behaviour>) + Send + Sync>;
+pub type EventLoopFn = Box<dyn FnOnce(&mut EventLoop) + Send + Sync>;
+
+#[derive(Default)]
+pub(crate) struct PendingQueries {
+    pub dial: HashMap<PeerId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
+    pub start_providing: HashMap<kad::QueryId, oneshot::Sender<()>>,
+    pub get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
+    pub object_rpc: HashMap<OutboundRequestId,
+                                oneshot::Sender<Result<Vec<SignedObject>, Box<dyn Error + Send>>>>,
+    pub bootstrap_listener: Option<oneshot::Sender<()>>
+}
 
 pub(crate) struct EventLoop {
-    swarm: Swarm<Behaviour>,
+    pub swarm: Swarm<Behaviour>,
+    pub pending: PendingQueries,
     command_receiver: mpsc::Receiver<Command>,
-    fn_receiver: mpsc::Receiver<SwarmFn>,
-    event_sender: mpsc::Sender<Event>,
-    pending_dial: HashMap<PeerId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
-    pending_start_providing: HashMap<kad::QueryId, oneshot::Sender<()>>,
-    pending_get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
-    pending_object_rpc: HashMap<OutboundRequestId,
-                                oneshot::Sender<Result<Vec<SignedObject>, Box<dyn Error + Send>>>>,
-    bootstrap_listener: Option<oneshot::Sender<()>>
+    fn_receiver: mpsc::Receiver<EventLoopFn>,
+    event_sender: mpsc::Sender<Event>
 }
 
 impl EventLoop {
@@ -44,18 +50,14 @@ impl EventLoop {
         swarm: Swarm<Behaviour>,
         command_receiver: mpsc::Receiver<Command>,
         event_sender: mpsc::Sender<Event>,
-        fn_receiver: mpsc::Receiver<SwarmFn>
+        fn_receiver: mpsc::Receiver<EventLoopFn>
     ) -> Self {
         Self {
             swarm,
             command_receiver,
             event_sender,
             fn_receiver,
-            pending_dial: Default::default(),
-            pending_start_providing: Default::default(),
-            pending_get_providers: Default::default(),
-            pending_object_rpc: Default::default(),
-            bootstrap_listener: Default::default()
+            pending: Default::default()
         }
     }
 
@@ -68,7 +70,7 @@ impl EventLoop {
                     // Command channel closed, thus shutting down the network event loop.
                     None=>  return,
                 },
-                func = self.fn_receiver.select_next_some() => func(&mut self.swarm)
+                func = self.fn_receiver.select_next_some() => func(&mut self)
             }
         }
     }
@@ -94,7 +96,8 @@ impl EventLoop {
                 },
             )) => {
                 let sender: oneshot::Sender<()> = self
-                    .pending_start_providing
+                    .pending
+                    .start_providing
                     .remove(&id)
                     .expect("Completed query to be previously pending.");
                 let _ = sender.send(());
@@ -110,7 +113,7 @@ impl EventLoop {
                     ..
                 },
             )) => {
-                if let Some(sender) = self.pending_get_providers.remove(&id) {
+                if let Some(sender) = self.pending.get_providers.remove(&id) {
                     sender.send(providers).expect("Receiver not to be dropped");
 
                     // Finish the query. We are only interested in the first result.
@@ -141,7 +144,7 @@ impl EventLoop {
                     return;
                 }
 
-                if let Some(sender) = self.bootstrap_listener.take() {
+                if let Some(sender) = self.pending.bootstrap_listener.take() {
                     let _ = sender.send(());
                 }
             },
@@ -165,7 +168,8 @@ impl EventLoop {
                     response,
                 } => {
                     let _ = self
-                        .pending_object_rpc
+                        .pending
+                        .object_rpc
                         .remove(&request_id)
                         .expect("Request to still be pending.")
                         .send(Ok(response.0));
@@ -177,7 +181,8 @@ impl EventLoop {
                 },
             )) => {
                 let _ = self
-                    .pending_object_rpc
+                    .pending
+                    .object_rpc
                     .remove(&request_id)
                     .expect("Request to still be pending.")
                     .send(Err(Box::new(error)));
@@ -199,7 +204,7 @@ impl EventLoop {
             } => {
                 event!(Level::INFO, "Established incoming from {peer_id}");
                 if endpoint.is_dialer() {
-                    if let Some(sender) = self.pending_dial.remove(&peer_id) {
+                    if let Some(sender) = self.pending.dial.remove(&peer_id) {
                         let _ = sender.send(Ok(()));
                     }
                 }
@@ -209,7 +214,7 @@ impl EventLoop {
                 event!(Level::INFO, "Outgoing error: {error}");
 
                 if let Some(peer_id) = peer_id {
-                    if let Some(sender) = self.pending_dial.remove(&peer_id) {
+                    if let Some(sender) = self.pending.dial.remove(&peer_id) {
                         let _ = sender.send(Err(Box::new(error)));
                     }
                 }
@@ -230,7 +235,7 @@ impl EventLoop {
     async fn handle_command(&mut self, command: Command) {
         match command {
             Command::NotifyAfterBootstrap { sender } => {
-                self.bootstrap_listener = Some(sender);
+                self.pending.bootstrap_listener = Some(sender);
             }
             Command::StartListening { addr, sender } => {
                 let _ = match self.swarm.listen_on(addr) {
@@ -243,7 +248,7 @@ impl EventLoop {
                 peer_addr,
                 sender,
             } => {
-                if let hash_map::Entry::Vacant(e) = self.pending_dial.entry(peer_id) {
+                if let hash_map::Entry::Vacant(e) = self.pending.dial.entry(peer_id) {
                     self.swarm
                         .behaviour_mut()
                         .kademlia
@@ -267,7 +272,7 @@ impl EventLoop {
                     .kademlia
                     .start_providing(Vec::from(object).into())
                     .expect("No store error.");
-                self.pending_start_providing.insert(query_id, sender);
+                self.pending.start_providing.insert(query_id, sender);
             }
             Command::GetProviders { object, sender } => {
                 let query_id = self
@@ -275,7 +280,7 @@ impl EventLoop {
                     .behaviour_mut()
                     .kademlia
                     .get_providers(Vec::from(object).into());
-                self.pending_get_providers.insert(query_id, sender);
+                self.pending.get_providers.insert(query_id, sender);
             }
             Command::SendRpc {
                 rpc,
@@ -287,7 +292,7 @@ impl EventLoop {
                     .behaviour_mut()
                     .object_exchange
                     .send_request(&peer, ObjectRpc(rpc));
-                self.pending_object_rpc.insert(request_id, sender);
+                self.pending.object_rpc.insert(request_id, sender);
             }
             Command::RespondRpc { response, channel } => {
                 self.swarm
