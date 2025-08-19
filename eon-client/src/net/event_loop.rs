@@ -61,8 +61,9 @@ impl EventLoop {
     pub(crate) async fn run(mut self) {
         loop {
             tokio::select! {
-                event = self.swarm.select_next_some() => self.handle_event(event).await,
-                func = self.fn_receiver.select_next_some() => func(&mut self)
+                Some(event) = self.swarm.next() => self.handle_event(event).await,
+                Some(func) = self.fn_receiver.next() => func(&mut self),
+                else => return
             }
         }
     }
