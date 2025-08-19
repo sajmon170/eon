@@ -5,19 +5,12 @@ use std::{
 };
 
 use futures::{
-    channel::{mpsc, oneshot},
+    channel::{mpsc, oneshot::{self, Canceled}},
     prelude::*,
     StreamExt,
 };
 use libp2p::{
-    core::Multiaddr,
-    identity, kad,
-    multiaddr::Protocol,
-    noise,
-    request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel},
-    swarm::{NetworkBehaviour, Swarm, SwarmEvent},
-    tcp, yamux, PeerId, StreamProtocol,
-    identify,
+    core::Multiaddr, identify, identity, kad, multiaddr::Protocol, noise, request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel}, swarm::{self, NetworkBehaviour, Swarm, SwarmEvent}, tcp, yamux, PeerId, StreamProtocol
 };
 use serde::{Deserialize, Serialize};
 
@@ -97,6 +90,7 @@ pub(crate) async fn new(
 
     let (command_sender, command_receiver) = mpsc::channel(0);
     let (event_sender, event_receiver) = mpsc::channel(0);
+    let (fn_sender, fn_receiver) = mpsc::channel(0);
 
     let control = swarm.behaviour().data_stream.new_control();
 
@@ -104,10 +98,11 @@ pub(crate) async fn new(
         Client {
             keys: id_keys,
             sender: command_sender,
-            streams: StreamRouterHandle::new(control)
+            streams: StreamRouterHandle::new(control),
+            fn_sender
         },
         event_receiver,
-        EventLoop::new(swarm, command_receiver, event_sender),
+        EventLoop::new(swarm, command_receiver, event_sender, fn_receiver),
     ))
 }
 
@@ -116,9 +111,23 @@ pub(crate) struct Client {
     keys: identity::Keypair,
     sender: mpsc::Sender<Command>,
     streams: StreamRouterHandle,
+    fn_sender: mpsc::Sender<SwarmFn>
 }
 
 impl Client {
+    async fn register<T: Send + Sync + 'static>(
+        &mut self,
+        func: impl FnOnce(&mut Swarm<Behaviour>) -> T + Send + Sync + 'static
+    ) -> Result<T, Canceled> {
+        let (tx, rx) = oneshot::channel();
+        self.fn_sender.send(Box::new(move |swarm| {
+            let output = func(swarm);
+            let _ = tx.send(output);
+        }));
+
+        rx.await
+    }
+    
     pub(crate) async fn bootstrap(&mut self) -> Result<(), Box<dyn Error>> {
         let (sender, receiver) = oneshot::channel::<()>();
 

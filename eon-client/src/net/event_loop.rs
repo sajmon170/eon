@@ -10,14 +10,7 @@ use futures::{
     StreamExt,
 };
 use libp2p::{
-    core::Multiaddr,
-    identity, kad,
-    multiaddr::Protocol,
-    noise,
-    request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel},
-    swarm::{NetworkBehaviour, Swarm, SwarmEvent},
-    tcp, yamux, PeerId, StreamProtocol,
-    identify
+    core::Multiaddr, identify, identity, kad::{self, QueryId}, multiaddr::Protocol, noise, request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel}, swarm::{NetworkBehaviour, Swarm, SwarmEvent}, tcp, yamux, PeerId, StreamProtocol
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,9 +18,18 @@ use tracing::{Level, event};
 
 use objects::prelude::*;
 
+pub enum SwarmOutput {
+    PeerId(PeerId),
+    QueryId(QueryId),
+    OutboundRequestId(OutboundRequestId)
+}
+
+pub type SwarmFn = Box<dyn FnOnce(&mut Swarm<Behaviour>) + Send + Sync>;
+
 pub(crate) struct EventLoop {
     swarm: Swarm<Behaviour>,
     command_receiver: mpsc::Receiver<Command>,
+    fn_receiver: mpsc::Receiver<SwarmFn>,
     event_sender: mpsc::Sender<Event>,
     pending_dial: HashMap<PeerId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
     pending_start_providing: HashMap<kad::QueryId, oneshot::Sender<()>>,
@@ -42,11 +44,13 @@ impl EventLoop {
         swarm: Swarm<Behaviour>,
         command_receiver: mpsc::Receiver<Command>,
         event_sender: mpsc::Sender<Event>,
+        fn_receiver: mpsc::Receiver<SwarmFn>
     ) -> Self {
         Self {
             swarm,
             command_receiver,
             event_sender,
+            fn_receiver,
             pending_dial: Default::default(),
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
@@ -58,12 +62,13 @@ impl EventLoop {
     pub(crate) async fn run(mut self) {
         loop {
             tokio::select! {
-                event = self.swarm.select_next_some() => self.handle_event(event).await,
+                Some(event) = self.swarm.next() => self.handle_event(event).await,
                 command = self.command_receiver.next() => match command {
                     Some(c) => self.handle_command(c).await,
                     // Command channel closed, thus shutting down the network event loop.
                     None=>  return,
                 },
+                Some(func) = self.fn_receiver.next() => func(&mut self.swarm)
             }
         }
     }
