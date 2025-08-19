@@ -1,4 +1,4 @@
-use libp2p_scaffolding::event_subscriber;
+use libp2p_invert::event_subscriber;
 
 struct Test;
 
