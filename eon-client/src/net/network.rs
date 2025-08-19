@@ -162,12 +162,15 @@ impl Client {
         &mut self,
         addr: Multiaddr,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let (sender, receiver) = oneshot::channel();
-        let _ = self.sender
-            .send(Command::StartListening { addr, sender })
-            .await;
-        
-        receiver.await.expect("Sender not to be dropped.")
+        let status = self.register(move |swarm| {
+            swarm
+                .listen_on(addr)
+        }).await?;
+
+        match status {
+            Ok(_) => Ok(()),
+            Err(e) => Err(Box::new(e))
+        }
     }
 
     /// Dial the given peer at the given address.

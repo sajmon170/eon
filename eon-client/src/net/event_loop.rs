@@ -237,12 +237,6 @@ impl EventLoop {
             Command::NotifyAfterBootstrap { sender } => {
                 self.pending.bootstrap_listener = Some(sender);
             }
-            Command::StartListening { addr, sender } => {
-                let _ = match self.swarm.listen_on(addr) {
-                    Ok(_) => sender.send(Ok(())),
-                    Err(e) => sender.send(Err(Box::new(e))),
-                };
-            }
         }
     }
 }
@@ -259,10 +253,6 @@ pub(crate) struct Behaviour {
 pub(crate) enum Command {
     NotifyAfterBootstrap {
         sender: oneshot::Sender<()>
-    },
-    StartListening {
-        addr: Multiaddr,
-        sender: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
     },
 }
 
