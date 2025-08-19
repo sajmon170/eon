@@ -243,28 +243,6 @@ impl EventLoop {
                     Err(e) => sender.send(Err(Box::new(e))),
                 };
             }
-            Command::Dial {
-                peer_id,
-                peer_addr,
-                sender,
-            } => {
-                if let hash_map::Entry::Vacant(e) = self.pending.dial.entry(peer_id) {
-                    self.swarm
-                        .behaviour_mut()
-                        .kademlia
-                        .add_address(&peer_id, peer_addr.clone());
-                    match self.swarm.dial(peer_addr.with(Protocol::P2p(peer_id))) {
-                        Ok(()) => {
-                            e.insert(sender);
-                        }
-                        Err(e) => {
-                            let _ = sender.send(Err(Box::new(e)));
-                        }
-                    }
-                } else {
-                    todo!("Already dialing peer.");
-                }
-            }
         }
     }
 }
@@ -284,11 +262,6 @@ pub(crate) enum Command {
     },
     StartListening {
         addr: Multiaddr,
-        sender: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
-    },
-    Dial {
-        peer_id: PeerId,
-        peer_addr: Multiaddr,
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
     },
 }

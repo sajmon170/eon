@@ -176,15 +176,20 @@ impl Client {
         peer_id: PeerId,
         peer_addr: Multiaddr,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let (sender, receiver) = oneshot::channel();
-        let _ = self.sender
-            .send(Command::Dial {
-                peer_id,
-                peer_addr,
-                sender,
-            })
-            .await;
-        receiver.await.expect("Sender not to be dropped.")
+        let _ = self.register(move |swarm| {
+            swarm
+                .behaviour_mut()
+                .kademlia
+                .add_address(&peer_id, peer_addr.clone());
+
+            swarm.dial(peer_addr.with(Protocol::P2p(peer_id)))
+        }).await?;
+
+        let rx = self.add_pending(move |db, sender| {
+            db.dial.insert(peer_id, sender);
+        }).await;
+
+        rx.await?
     }
 
     /// Advertise the local node as the provider of the given file on the DHT.
