@@ -55,7 +55,7 @@ impl AppController {
         Ok(())
     }
 
-    async fn handle_command(&mut self, cmd: Command) -> Result<AppStatus, Box<dyn Error>> {
+    async fn handle_command(&mut self, cmd: Command) -> Result<AppStatus, Box<dyn Error + Send + Sync>> {
         let event: Option<AppStatus> = match cmd {
             Command::Provide { path } => {
                 let file = BinaryFile::new(&path);
@@ -75,7 +75,7 @@ impl AppController {
             Command::Get { name } => {
                 let id: ObjectId = BASE64_STANDARD.decode(&name).unwrap().try_into().unwrap();
 
-                let providers = self.network_client.get_providers(id.clone()).await;
+                let providers = self.network_client.get_providers(id.clone()).await?;
                 if providers.is_empty() {
                     return Err(format!("Could not find provider for file {name}.").into());
                 }

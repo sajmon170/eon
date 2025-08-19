@@ -191,36 +191,40 @@ impl Client {
     }
 
     /// Advertise the local node as the provider of the given file on the DHT.
-    pub(crate) async fn start_providing(&mut self, object: ObjectId) {
+    pub(crate) async fn start_providing(&mut self, object: ObjectId)
+        -> Result<(), Box<dyn Error + Send + Sync>> {
         let query_id = self.register(move |swarm| {
             swarm
                 .behaviour_mut()
                 .kademlia
                 .start_providing(Vec::from(object).into())
                 .expect("No store error.")
-        }).await.unwrap();
+        }).await?;
 
         let rx = self.add_pending(move |db, sender| {
             db.start_providing.insert(query_id, sender);
         }).await;
 
-        rx.await.unwrap();
+        rx.await?;
+
+        Ok(())
     }
 
     /// Find the providers for the given file on the DHT.
-    pub(crate) async fn get_providers(&mut self, object: ObjectId) -> HashSet<PeerId> {
+    pub(crate) async fn get_providers(&mut self, object: ObjectId)
+        -> Result<HashSet<PeerId>, Box<dyn Error + Send + Sync>> {
         let query_id = self.register(move |swarm| {
             swarm
                 .behaviour_mut()
                 .kademlia
                 .get_providers(Vec::from(object).into())
-        }).await.unwrap();
+        }).await?;
 
         let rx = self.add_pending(move |db, sender| {
             db.get_providers.insert(query_id, sender);
         }).await;
 
-        rx.await.unwrap()
+        Ok(rx.await?)
     }
 
     /// Send an object RPC
