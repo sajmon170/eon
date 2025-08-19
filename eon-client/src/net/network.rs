@@ -129,17 +129,16 @@ impl Client {
         rx.await
     }
 
-    async fn add_pending(
+    async fn add_pending<T: Send + Sync + 'static>(
         &mut self,
-        func: impl FnOnce(&mut PendingQueries) + Send + Sync + 'static
-    ) -> Result<(), Canceled> {
+        func: impl FnOnce(&mut PendingQueries, oneshot::Sender<T>) + Send + Sync + 'static
+    ) -> oneshot::Receiver<T> {
         let (tx, rx) = oneshot::channel();
         self.fn_sender.send(Box::new(move |event_loop| {
-            func(&mut event_loop.pending);
-            let _ = tx.send(());
+            func(&mut event_loop.pending, tx);
         })).await;
 
-        rx.await
+        rx
     }
     
     pub(crate) async fn bootstrap(&mut self) -> Result<(), Box<dyn Error>> {
@@ -162,7 +161,7 @@ impl Client {
     pub(crate) async fn start_listening(
         &mut self,
         addr: Multiaddr,
-    ) -> Result<(), Box<dyn Error + Send>> {
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let (sender, receiver) = oneshot::channel();
         let _ = self.sender
             .send(Command::StartListening { addr, sender })
@@ -176,7 +175,7 @@ impl Client {
         &mut self,
         peer_id: PeerId,
         peer_addr: Multiaddr,
-    ) -> Result<(), Box<dyn Error + Send>> {
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let (sender, receiver) = oneshot::channel();
         let _ = self.sender
             .send(Command::Dial {
@@ -211,16 +210,19 @@ impl Client {
         &mut self,
         peer: PeerId,
         rpc: TypedObject,
-    ) -> Result<Vec<SignedObject>, Box<dyn Error + Send>> {
-        let (sender, receiver) = oneshot::channel();
-        let _ = self.sender
-            .send(Command::SendRpc {
-                rpc,
-                peer,
-                sender,
-            })
-            .await;
-        receiver.await.expect("Sender not be dropped.")
+    ) -> Result<Vec<SignedObject>, Box<dyn Error + Send + Sync>> {
+        let request_id = self.register(move |swarm| {
+            swarm
+                .behaviour_mut()
+                .object_exchange
+                .send_request(&peer, ObjectRpc(rpc))
+        }).await?;
+
+        let rx = self.add_pending(move |db, sender| {
+            db.object_rpc.insert(request_id, sender);
+        }).await;
+
+        rx.await?
     }
 
     /// Respond to an object RPC

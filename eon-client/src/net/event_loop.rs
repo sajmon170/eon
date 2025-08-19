@@ -29,11 +29,11 @@ pub type EventLoopFn = Box<dyn FnOnce(&mut EventLoop) + Send + Sync>;
 
 #[derive(Default)]
 pub(crate) struct PendingQueries {
-    pub dial: HashMap<PeerId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
+    pub dial: HashMap<PeerId, oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>>,
     pub start_providing: HashMap<kad::QueryId, oneshot::Sender<()>>,
     pub get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
     pub object_rpc: HashMap<OutboundRequestId,
-                                oneshot::Sender<Result<Vec<SignedObject>, Box<dyn Error + Send>>>>,
+                                oneshot::Sender<Result<Vec<SignedObject>, Box<dyn Error + Send + Sync>>>>,
     pub bootstrap_listener: Option<oneshot::Sender<()>>
 }
 
@@ -282,25 +282,6 @@ impl EventLoop {
                     .get_providers(Vec::from(object).into());
                 self.pending.get_providers.insert(query_id, sender);
             }
-            Command::SendRpc {
-                rpc,
-                peer,
-                sender,
-            } => {
-                let request_id = self
-                    .swarm
-                    .behaviour_mut()
-                    .object_exchange
-                    .send_request(&peer, ObjectRpc(rpc));
-                self.pending.object_rpc.insert(request_id, sender);
-            }
-            Command::RespondRpc { response, channel } => {
-                self.swarm
-                    .behaviour_mut()
-                    .object_exchange
-                    .send_response(channel, ObjectResponse(response))
-                    .expect("Connection to peer to be still open.");
-            }
         }
     }
 }
@@ -320,12 +301,12 @@ pub(crate) enum Command {
     },
     StartListening {
         addr: Multiaddr,
-        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
     },
     Dial {
         peer_id: PeerId,
         peer_addr: Multiaddr,
-        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
     },
     StartProviding {
         object: ObjectId,
@@ -334,15 +315,6 @@ pub(crate) enum Command {
     GetProviders {
         object: ObjectId,
         sender: oneshot::Sender<HashSet<PeerId>>,
-    },
-    SendRpc {
-        rpc: TypedObject,
-        peer: PeerId,
-        sender: oneshot::Sender<Result<Vec<SignedObject>, Box<dyn Error + Send>>>,
-    },
-    RespondRpc {
-        response: Vec<SignedObject>,
-        channel: ResponseChannel<ObjectResponse>,
     },
 }
 
@@ -356,6 +328,6 @@ pub(crate) enum Event {
 
 // Simple file exchange protocol
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ObjectRpc(TypedObject);
+pub(crate) struct ObjectRpc(pub TypedObject);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ObjectResponse(pub Vec<SignedObject>);
