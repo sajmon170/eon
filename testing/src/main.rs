@@ -1,6 +1,6 @@
 #![allow(dead_code, unused)]
 
-use libp2p_invert::event_subscriber;
+use libp2p_invert::{event_subscriber, swarm_client};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use libp2p::kad;
 use libp2p::kad::QueryId;
@@ -11,16 +11,14 @@ use std::collections::HashMap;
 struct QueryId;
 */
 
-// TODO - add this automagically
-#[derive(Clone)]
-pub(crate) struct Client {
-    fn_sender: tokio::sync::mpsc::Sender<EventLoopFn>
-}
-
 #[derive(NetworkBehaviour)]
 pub(crate) struct Behaviour {
     pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
 }
+
+#[swarm_client(Behaviour)]
+#[derive(Clone)]
+pub(crate) struct Client;
 
 #[event_subscriber(Behaviour)]
 impl Client {
