@@ -1,3 +1,5 @@
+#![allow(dead_code, unused)]
+
 use libp2p_invert::event_subscriber;
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use libp2p::kad;
@@ -46,7 +48,19 @@ impl Client {
                 result: kad::QueryResult::StartProviding(_),
                 ..
             },
-        )));
+        ))).await;
+        println!("---");
+    } 
+
+    async fn yet_another_fun(&self) {
+        let my_event = unsafe { std::mem::transmute::<usize, QueryId>(12) };
+        let _ = subscribe!(_ => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
+            kad::Event::OutboundQueryProgressed {
+                id,
+                result: kad::QueryResult::StartProviding(_),
+                ..
+            },
+        ))).await;
         println!("---");
     } 
 }
@@ -59,4 +73,5 @@ fn main() {
     let client = Client { fn_sender: tx };
     client.testing();
     client.another_fun();
+    client.yet_another_fun();
 }

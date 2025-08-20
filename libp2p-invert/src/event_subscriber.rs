@@ -66,36 +66,76 @@ fn stringify<T: ToTokens>(node: &T) -> String {
 impl ToTokens for SubscribeQueue {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let name = tools::member_case(&self.name);
-        let query_id = &self.invocation.query_id;
+        
+        let output = match &self.invocation {
+            SubscribeInvocation::WithKey(invocation) => {
+                let query_id = &invocation.query_id;
 
-        tokens.append_all(quote! {
-            async {
-                let rx = self.add_pending(move |db, sender| {
-                    db.#name.insert(#query_id, sender);
-                }).await;
+                quote! {
+                    async {
+                        let rx = self.add_pending(move |db, sender| {
+                            db.#name.insert(#query_id, sender);
+                        }).await;
 
-                rx.await
+                        rx.await
+                    }
+                }
             }
-        });
+            SubscribeInvocation::WithoutKey(invocation) => {
+                quote! { async {
+                    let rx = self.add_pending(move |db, sender| {
+                        db.#name.insert(sender);
+                    }).await;
+
+                    rx.await
+                } }
+            }
+        };
+
+        tokens.append_all(output);
     }
 }
 
-// Corresponds to the subscribe! pseudomacro itself
+
+enum SubscribeInvocation {
+    WithKey(SubscribeInvocationWithKey),
+    WithoutKey(SubscribeInvocationWithoutKey)
+}
+
+impl Parse for SubscribeInvocation {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let lookahead = input.lookahead1();
+        if lookahead.peek(Token![_]) {
+            input.parse().map(Self::WithoutKey)
+        }
+        else {
+            input.parse().map(Self::WithKey)
+        }
+    }
+}
+
 #[derive(syn_derive::Parse)]
-struct SubscribeInvocation {
+struct SubscribeInvocationWithoutKey {
+    _underscore_token: Token![_],
+    _fat_arrow_token: Token![=>],
+    pattern: EventLoopPatternWithoutKey
+}
+
+#[derive(syn_derive::Parse)]
+struct SubscribeInvocationWithKey {
     query_id: syn::Ident,
     _colon_token: Token![:],
     query_type: syn::Type,
     _fat_arrow_token: Token![=>],
-    pattern: EventLoopPattern
+    pattern: EventLoopPatternWithKey
 }
 
-struct EventLoopPattern {
+struct EventLoopPatternWithKey {
     query_key: syn::Member,
     pattern: syn::Pat
 }
 
-impl Parse for EventLoopPattern {
+impl Parse for EventLoopPatternWithKey {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let mut pattern = syn::Pat::parse_single(input)?;
         let mut visitor = PatternVisitor::default();
@@ -104,13 +144,36 @@ impl Parse for EventLoopPattern {
         let key_no = visitor.keys.len();
         if key_no != 1 {
             return Err(input.error(format!(
-                "The subscribe! macro requires 1 key, but {key_no} were provided"
+                "The filter type subscribe! macro requires 1 key, but {key_no} were provided"
             )));
         }
 
         let query_key = visitor.keys[0].member.clone();
         Ok(Self {
             query_key,
+            pattern
+        })
+    }
+}
+
+struct EventLoopPatternWithoutKey {
+    pattern: syn::Pat
+}
+
+impl Parse for EventLoopPatternWithoutKey {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut pattern = syn::Pat::parse_single(input)?;
+        let mut visitor = PatternVisitor::default();
+
+        visitor.visit_pat_mut(&mut pattern);
+        let key_no = visitor.keys.len();
+        if key_no > 0 {
+            return Err(input.error(format!(
+                "You need to provide a concrete value to match the key against."
+            )));
+        }
+
+        Ok(Self {
             pattern
         })
     }
@@ -141,20 +204,72 @@ struct EventLoop {
 }
 
 impl EventLoop {
-    fn append_pending_queries_struct(&self, tokens: &mut TokenStream) {
-        let db_items = self.queues
+    fn get_queues_with_keys(&self) -> impl Iterator<Item = &SubscribeQueue> {
+        self.queues
             .iter()
+            .filter_map(|queue| {
+                if let SubscribeInvocation::WithKey(_) = &queue.invocation {
+                    Some(queue)
+                }
+                else {
+                    None
+                }
+            })
+    }
+    
+    fn get_invocations_with_keys(&self) -> impl Iterator<Item = &SubscribeInvocationWithKey> {
+        self.get_queues_with_keys()
+            .filter_map(|queue| {
+                if let SubscribeInvocation::WithKey(invocation) = &queue.invocation {
+                    Some(invocation)
+                }
+                else {
+                    None
+                }
+            })
+    }
+
+    fn get_queues_without_keys(&self) -> impl Iterator<Item = &SubscribeQueue> {
+        self.queues
+            .iter()
+            .filter_map(|queue| {
+                if let SubscribeInvocation::WithoutKey(_) = &queue.invocation {
+                    Some(queue)
+                }
+                else {
+                    None
+                }
+            })
+    }
+    
+    fn get_invocations_without_keys(&self) -> impl Iterator<Item = &SubscribeInvocationWithoutKey> {
+        self.get_queues_with_keys()
+            .filter_map(|queue| {
+                if let SubscribeInvocation::WithoutKey(invocation) = &queue.invocation {
+                    Some(invocation)
+                }
+                else {
+                    None
+                }
+            })
+    }
+    
+    fn append_pending_queries_struct(&self, tokens: &mut TokenStream) {
+        let with_key_db_items = self.get_queues_with_keys()
             .map(|queue| tools::member_case(&queue.name));
 
-        let db_types = self.queues
-            .iter()
-            .map(|queue| &queue.invocation.query_type);
+        let with_key_db_types = self.get_invocations_with_keys()
+            .map(|invocation| &invocation.query_type);
+
+        let without_key_db_items = self.get_queues_without_keys()
+            .map(|queue| tools::member_case(&queue.name));
         
         // TODO - make the behaviour generic
         tokens.append_all(quote! {
             #[derive(Default)]
             pub(crate) struct PendingQueries {
-                #(pub #db_items: HashMap<#db_types, tokio::sync::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>>),*
+                #(pub #with_key_db_items: HashMap<#with_key_db_types, tokio::sync::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>>),*,
+                #(pub #without_key_db_items: Option<tokio::sync::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>>),*
             }
         });
     }
@@ -174,13 +289,23 @@ impl EventLoop {
             .iter()
             .map(|queue| tools::member_case(&queue.name));
 
-        let patterns = self.queues
+        let with_keys = self.queues
             .iter()
-            .map(|queue| &queue.invocation.pattern.pattern);
+            .filter_map(|queue| {
+                if let SubscribeInvocation::WithKey(invocation) = &queue.invocation {
+                    Some(invocation)
+                }
+                else {
+                    None
+                }
+            });        
+
+        let patterns = with_keys
+            .clone()
+            .map(|invocation| &invocation.pattern.pattern);
         
-        let keys = self.queues
-            .iter()
-            .map(|queue| &queue.invocation.pattern.query_key);
+        let keys = with_keys
+            .map(|invocation| &invocation.pattern.query_key);
         
         tokens.append_all(quote! {
             impl EventLoop {
