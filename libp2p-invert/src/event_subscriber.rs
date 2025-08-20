@@ -9,9 +9,42 @@ pub fn impl_event_subscriber(mut ast: syn::ItemImpl, name: syn::Ident) -> TokenS
     let mut visitor = SubscriberVisitor::default();
     visitor.visit_item_impl_mut(&mut ast);
     let event_loop = visitor.event_loop;
-    println!("{}", stringify(&event_loop));
-    println!("{}", stringify(&name));
-    quote!(#ast)
+
+    let self_ty = ast.self_ty.clone();
+    quote!(
+        #ast
+
+        #event_loop
+
+        pub type EventLoopFn = Box<dyn FnOnce(&mut EventLoop) + Send + Sync>;
+
+        impl #self_ty {
+            async fn register<T: Send + Sync + 'static>(
+                &mut self,
+                func: impl FnOnce(&mut libp2p::swarm::Swarm<Behaviour>) -> T + Send + Sync + 'static
+            ) -> Result<T, Canceled> {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                self.fn_sender.send(Box::new(move |event_loop| {
+                    let output = func(&mut event_loop.swarm);
+                    let _ = tx.send(output);
+                })).await;
+
+                rx.await
+            }
+
+            async fn add_pending<T: Send + Sync + 'static>(
+                &mut self,
+                func: impl FnOnce(&mut PendingQueries, futures::channel::oneshot::Sender<T>) + Send + Sync + 'static
+            ) -> futures::channel::oneshot::Receiver<T> {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                self.fn_sender.send(Box::new(move |event_loop| {
+                    func(&mut event_loop.pending, tx);
+                })).await;
+
+                rx
+            }
+        }
+    )
 }
 
 // Corresponds to a single function that calls the subscribe! macro
@@ -32,14 +65,17 @@ fn stringify<T: ToTokens>(node: &T) -> String {
 
 impl ToTokens for SubscribeQueue {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        // This replaces the subscribe! macro inline
-        let name = stringify(&self.name);
-        let query_id = stringify(&self.invocation.query_id);
-        let query_type = stringify(&self.invocation.query_type);
-        let query_key = stringify(&self.invocation.pattern.query_key);
-        let pattern = stringify(&self.invocation.pattern.pattern);
+        let name = tools::member_case(&self.name);
+        let query_id = &self.invocation.query_id;
+
         tokens.append_all(quote! {
-            println!("Name: {:?}, Query id: {:?}, Query type: {:?}, Key: {:?}, pattern: {:?}", #name, #query_id, #query_type, #query_key, #pattern)
+            async {
+                let rx = self.add_pending(move |db, sender| {
+                    db.#name.insert(#query_id, sender);
+                }).await;
+
+                rx.await
+            }
         });
     }
 }
@@ -118,7 +154,7 @@ impl EventLoop {
         tokens.append_all(quote! {
             #[derive(Default)]
             pub(crate) struct PendingQueries {
-                #(pub #db_items: HashMap<#db_types, libp2p::swarm::SwarmEvent<Behaviour>>),*
+                #(pub #db_items: HashMap<#db_types, futures::channel::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>>),*
             }
         });
     }
@@ -126,10 +162,9 @@ impl EventLoop {
     fn append_event_loop_struct(&self, tokens: &mut TokenStream) {
         tokens.append_all(quote! {
             pub(crate) struct EventLoop {
-                pub swarm: Swarm<Behaviour>,
+                pub swarm: libp2p::swarm::Swarm<Behaviour>,
                 pub pending: PendingQueries,
-                fn_receiver: mpsc::Receiver<EventLoopFn>,
-                event_sender: mpsc::Sender<Event>
+                fn_receiver: futures::channel::mpsc::Receiver<EventLoopFn>,
             }
         })
     }
@@ -150,13 +185,11 @@ impl EventLoop {
         tokens.append_all(quote! {
             impl EventLoop {
                 pub fn new(
-                    swarm: Swarm<Behaviour>,
-                    event_sender: mpsc::Sender<Event>,
+                    swarm: libp2p::swarm::Swarm<Behaviour>,
                     fn_receiver: mpsc::Receiver<EventLoopFn>
                 ) -> Self {
                     Self {
                         swarm,
-                        event_sender,
                         fn_receiver,
                         pending: Default::default()
                     }
@@ -164,16 +197,15 @@ impl EventLoop {
 
                 pub(crate) async fn run(mut self) {
                     loop {
-                        tokio::select! {
-                            Some(event) = self.swarm.next() => self.handle_event(event).await,
-                            Some(func) = self.fn_receiver.next() => func(&mut self),
-                            else => return
+                        futures::select! {
+                            event = self.swarm.select_next_some() => self.handle_event(event).await,
+                            func = self.fn_receiver.select_next_some() => func(&mut self),
                         }
                     }
                 }
 
-                async fn handle_event(&mut self, event: SwarmEvent<BehaviourEvent>) {
-                    match event {
+                async fn handle_event(&mut self, event: libp2p::swarm::SwarmEvent<BehaviourEvent>) {
+                    match &event {
                         #(#patterns => {
                             let sender = self
                                 .pending
@@ -183,6 +215,7 @@ impl EventLoop {
                             
                             let _ = sender.send(event);
                         })*
+                        _ => {}
                     }
                 }
             }
@@ -220,7 +253,7 @@ impl VisitMut for SubscriberVisitor {
                     .unwrap();
                 let context = self.current_fn.as_ref().unwrap().clone();
                 let queue = SubscribeQueue::new(context, invocation);
-                *expr = parse_quote!(#queue);
+                *node = parse_quote!(#queue);
                 self.event_loop.queues.push(queue);
             }
         }

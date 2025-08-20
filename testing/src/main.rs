@@ -1,15 +1,33 @@
 use libp2p_invert::event_subscriber;
+use futures::channel::mpsc;
+use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
+use libp2p::kad;
+use libp2p::kad::QueryId;
+use std::collections::HashMap;
+use futures::StreamExt;
+use futures::SinkExt;
+use futures::channel::oneshot::Canceled;
 
-struct Test;
-
-#[derive(Debug)]
+/*
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 struct QueryId;
+*/
 
-#[event_subscriber(MyBehaviour)]
-impl Test {
-    fn testing() {
+#[derive(Clone)]
+pub(crate) struct Client {
+    fn_sender: mpsc::Sender<EventLoopFn>
+}
+
+#[derive(NetworkBehaviour)]
+pub(crate) struct Behaviour {
+    pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
+}
+
+#[event_subscriber(Behaviour)]
+impl Client {
+    async fn testing(&mut self) {
         let x = vec![1, 2, 3];
-        let event_id = QueryId;
+        let event_id = unsafe { std::mem::transmute::<usize, QueryId>(12) };
         let v = subscribe!(event_id: QueryId => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
             kad::Event::OutboundQueryProgressed {
                 #[key] id,
@@ -23,24 +41,25 @@ impl Test {
         )));
     }
 
-    fn another_fun(&self) {
-        let my_event = QueryId;
-        let _ = subscribe!(my_event: QueryId => SwarmEvent::Other(gossipsub::Event{#[key] id, result}));
+    async fn another_fun(&mut self) {
+        let my_event = unsafe { std::mem::transmute::<usize, QueryId>(12) };
+        let _ = subscribe!(my_event: QueryId => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
+            kad::Event::OutboundQueryProgressed {
+                #[key] id,
+                result: kad::QueryResult::StartProviding(_),
+                ..
+            },
+        )));
         println!("---");
     } 
-
-    fn something_other(&self) {
-        println!("--");
-        let something = QueryId;
-        let _ = subscribe!(something: QueryId => SwarmEvent::Behaviour(something::Fun { other, #[key] val}));
-    }
 }
 
 fn main() {
     println!("Hello, world!");
-    Test::testing();
 
-    let test = Test;
-    test.another_fun();
-    test.something_other();
+    let (tx, _) = futures::channel::mpsc::channel(0);
+
+    let mut client = Client { fn_sender: tx };
+    client.testing();
+    client.another_fun();
 }
