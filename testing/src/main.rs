@@ -27,7 +27,7 @@ impl Client {
     async fn testing(&self) {
         let x = vec![1, 2, 3];
         let event_id = unsafe { std::mem::transmute::<usize, QueryId>(12) };
-        let v = subscribe!(event_id: QueryId => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
+        let result = subscribe!(event_id: QueryId => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
             kad::Event::OutboundQueryProgressed {
                 #[key] id,
                 result:
@@ -54,7 +54,7 @@ impl Client {
 
     async fn yet_another_fun(&self) {
         let my_event = unsafe { std::mem::transmute::<usize, QueryId>(12) };
-        let _ = subscribe!(_ => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
+        let id = subscribe!(_ => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
             kad::Event::OutboundQueryProgressed {
                 id,
                 result: kad::QueryResult::StartProviding(_),

@@ -70,6 +70,8 @@ impl ToTokens for SubscribeQueue {
         let output = match &self.invocation {
             SubscribeInvocation::WithKey(invocation) => {
                 let query_id = &invocation.query_id;
+                let pattern = &invocation.pattern.pattern;
+                let output = &invocation.pattern.output;
 
                 quote! {
                     async {
@@ -77,18 +79,29 @@ impl ToTokens for SubscribeQueue {
                             db.#name.insert(#query_id, sender);
                         }).await;
 
-                        rx.await
+                        match rx.await.unwrap() {
+                            #pattern => (#(#output),*),
+                            _ => panic!()
+                        }
                     }
                 }
             }
             SubscribeInvocation::WithoutKey(invocation) => {
-                quote! { async {
-                    let rx = self.add_pending(move |db, sender| {
-                        db.#name.insert(sender);
-                    }).await;
+                let pattern = &invocation.pattern.pattern;
+                let output = &invocation.pattern.output;
 
-                    rx.await
-                } }
+                quote! {
+                    async {
+                        let rx = self.add_pending(move |db, sender| {
+                            db.#name.insert(sender);
+                        }).await;
+
+                        match rx.await.unwrap() {
+                            #pattern => (#(#output),*),
+                            _ => panic!()
+                        }
+                    }
+                }
             }
         };
 
@@ -132,7 +145,8 @@ struct SubscribeInvocationWithKey {
 
 struct EventLoopPatternWithKey {
     query_key: syn::Member,
-    pattern: syn::Pat
+    pattern: syn::Pat,
+    output: Vec<syn::Member>
 }
 
 impl Parse for EventLoopPatternWithKey {
@@ -148,16 +162,23 @@ impl Parse for EventLoopPatternWithKey {
             )));
         }
 
+        let output = visitor.other
+            .into_iter()
+            .filter_map(|other| if let None = other.colon_token { Some(other.member) } else { None })
+            .collect();
+
         let query_key = visitor.keys[0].member.clone();
         Ok(Self {
             query_key,
-            pattern
+            pattern,
+            output
         })
     }
 }
 
 struct EventLoopPatternWithoutKey {
-    pattern: syn::Pat
+    pattern: syn::Pat,
+    output: Vec<syn::Member>
 }
 
 impl Parse for EventLoopPatternWithoutKey {
@@ -173,15 +194,22 @@ impl Parse for EventLoopPatternWithoutKey {
             )));
         }
 
+        let output = visitor.other
+            .into_iter()
+            .filter_map(|other| if let None = other.colon_token { Some(other.member) } else { None })
+            .collect();
+
         Ok(Self {
-            pattern
+            pattern,
+            output
         })
     }
 }
 
 #[derive(Default)]
 struct PatternVisitor {
-    keys: Vec<syn::FieldPat>
+    keys: Vec<syn::FieldPat>,
+    other: Vec<syn::FieldPat>
 }
 
 impl VisitMut for PatternVisitor {
@@ -192,6 +220,9 @@ impl VisitMut for PatternVisitor {
 
         if !attrs.is_empty() {
             self.keys.push(node.clone());
+        }
+        else {
+            self.other.push(node.clone());
         }
         
         visit_mut::visit_field_pat_mut(self, node);
