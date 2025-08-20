@@ -20,10 +20,10 @@ pub fn impl_event_subscriber(mut ast: syn::ItemImpl, name: syn::Ident) -> TokenS
 
         impl #self_ty {
             async fn register<T: Send + Sync + 'static>(
-                &mut self,
+                &self,
                 func: impl FnOnce(&mut libp2p::swarm::Swarm<Behaviour>) -> T + Send + Sync + 'static
-            ) -> Result<T, Canceled> {
-                let (tx, rx) = futures::channel::oneshot::channel();
+            ) -> Result<T, tokio::sync::oneshot::error::RecvError> {
+                let (tx, rx) = tokio::sync::oneshot::channel();
                 self.fn_sender.send(Box::new(move |event_loop| {
                     let output = func(&mut event_loop.swarm);
                     let _ = tx.send(output);
@@ -33,10 +33,10 @@ pub fn impl_event_subscriber(mut ast: syn::ItemImpl, name: syn::Ident) -> TokenS
             }
 
             async fn add_pending<T: Send + Sync + 'static>(
-                &mut self,
-                func: impl FnOnce(&mut PendingQueries, futures::channel::oneshot::Sender<T>) + Send + Sync + 'static
-            ) -> futures::channel::oneshot::Receiver<T> {
-                let (tx, rx) = futures::channel::oneshot::channel();
+                &self,
+                func: impl FnOnce(&mut PendingQueries, tokio::sync::oneshot::Sender<T>) + Send + Sync + 'static
+            ) -> tokio::sync::oneshot::Receiver<T> {
+                let (tx, rx) = tokio::sync::oneshot::channel();
                 self.fn_sender.send(Box::new(move |event_loop| {
                     func(&mut event_loop.pending, tx);
                 })).await;
@@ -154,7 +154,7 @@ impl EventLoop {
         tokens.append_all(quote! {
             #[derive(Default)]
             pub(crate) struct PendingQueries {
-                #(pub #db_items: HashMap<#db_types, futures::channel::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>>),*
+                #(pub #db_items: HashMap<#db_types, tokio::sync::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>>),*
             }
         });
     }
@@ -164,7 +164,7 @@ impl EventLoop {
             pub(crate) struct EventLoop {
                 pub swarm: libp2p::swarm::Swarm<Behaviour>,
                 pub pending: PendingQueries,
-                fn_receiver: futures::channel::mpsc::Receiver<EventLoopFn>,
+                fn_receiver: tokio::sync::mpsc::Receiver<EventLoopFn>,
             }
         })
     }
@@ -186,7 +186,7 @@ impl EventLoop {
             impl EventLoop {
                 pub fn new(
                     swarm: libp2p::swarm::Swarm<Behaviour>,
-                    fn_receiver: mpsc::Receiver<EventLoopFn>
+                    fn_receiver: tokio::sync::mpsc::Receiver<EventLoopFn>
                 ) -> Self {
                     Self {
                         swarm,
@@ -197,9 +197,10 @@ impl EventLoop {
 
                 pub(crate) async fn run(mut self) {
                     loop {
-                        futures::select! {
-                            event = self.swarm.select_next_some() => self.handle_event(event).await,
-                            func = self.fn_receiver.select_next_some() => func(&mut self),
+                        tokio::select! {
+                            Some(event) = futures::stream::StreamExt::next(&mut self.swarm) => self.handle_event(event).await,
+                            Some(func) = self.fn_receiver.recv() => func(&mut self),
+                            else => return
                         }
                     }
                 }

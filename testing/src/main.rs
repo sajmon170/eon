@@ -1,21 +1,18 @@
 use libp2p_invert::event_subscriber;
-use futures::channel::mpsc;
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use libp2p::kad;
 use libp2p::kad::QueryId;
 use std::collections::HashMap;
-use futures::StreamExt;
-use futures::SinkExt;
-use futures::channel::oneshot::Canceled;
 
 /*
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 struct QueryId;
 */
 
+// TODO - add this automagically
 #[derive(Clone)]
 pub(crate) struct Client {
-    fn_sender: mpsc::Sender<EventLoopFn>
+    fn_sender: tokio::sync::mpsc::Sender<EventLoopFn>
 }
 
 #[derive(NetworkBehaviour)]
@@ -25,7 +22,7 @@ pub(crate) struct Behaviour {
 
 #[event_subscriber(Behaviour)]
 impl Client {
-    async fn testing(&mut self) {
+    async fn testing(&self) {
         let x = vec![1, 2, 3];
         let event_id = unsafe { std::mem::transmute::<usize, QueryId>(12) };
         let v = subscribe!(event_id: QueryId => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
@@ -41,7 +38,7 @@ impl Client {
         )));
     }
 
-    async fn another_fun(&mut self) {
+    async fn another_fun(&self) {
         let my_event = unsafe { std::mem::transmute::<usize, QueryId>(12) };
         let _ = subscribe!(my_event: QueryId => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
             kad::Event::OutboundQueryProgressed {
@@ -57,9 +54,9 @@ impl Client {
 fn main() {
     println!("Hello, world!");
 
-    let (tx, _) = futures::channel::mpsc::channel(0);
+    let (tx, _) = tokio::sync::mpsc::channel(0);
 
-    let mut client = Client { fn_sender: tx };
+    let client = Client { fn_sender: tx };
     client.testing();
     client.another_fun();
 }
