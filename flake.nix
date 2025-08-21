@@ -27,7 +27,8 @@
             stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.clangStdenv;
         } rec {
             nativeBuildInputs = [
-              (rust-bin.stable.latest.default.override { extensions = [ "rust-src" ]; })
+              (rust-bin.stable.latest.default.override { extensions = [ "rust-src" "rust-analyzer" ]; })
+              (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default))
               pkg-config
             ];
             buildInputs = [
