@@ -294,12 +294,12 @@ impl EventLoop {
 
         let without_key_db_items = self.get_queues_without_keys()
             .map(|queue| tools::member_case(&queue.name));
-        
+
         // TODO - make the behaviour generic
         tokens.append_all(quote! {
             #[derive(Default)]
             pub(crate) struct PendingQueries {
-                #(pub #with_key_db_items: HashMap<#with_key_db_types, tokio::sync::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>>),*,
+                #(pub #with_key_db_items: HashMap<#with_key_db_types, tokio::sync::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>> ,)*
                 #(pub #without_key_db_items: Option<tokio::sync::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>>),*
             }
         });
