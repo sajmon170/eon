@@ -1,8 +1,9 @@
 use crate::{
     app::{repl::*, state::AppStateHandle},
     net::{
-        event_loop::{self, Event},
-        network::{Client, EventStream},
+        //event_loop::{self, Event},
+        //network::{Client, EventStream},
+        network2::Client
     },
 };
 use anyhow::Result;
@@ -26,7 +27,6 @@ pub enum AppStatus {
 struct AppController {
     state: AppStateHandle,
     network_client: Client,
-    network_events: EventStream,
     rx: mpsc::Receiver<Command>,
 }
 
@@ -34,25 +34,18 @@ impl AppController {
     async fn run(&mut self) {
         loop {
             tokio::select! {
-                Some(event) = self.network_events.next() => self.handle_event(event).await.unwrap(),
+                //Some(event) = self.network_events.next() => self.handle_event(event).await.unwrap(),
+                _ = self.network_client.on_identify_received() => { },
+                (rpc, channel) = self.network_client.on_object_request() => {
+                    event!(Level::INFO, "Responding to request.");
+
+                    if let Some(objects) = self.state.rpc(rpc).await {
+                        self.network_client.respond_rpc(objects, channel).await;
+                    }
+                }
                 Some(cmd) = self.rx.recv() => { self.handle_command(cmd).await.unwrap(); }
             }
         }
-    }
-
-    async fn handle_event(&mut self, event: Event) -> Result<(), Box<dyn Error>> {
-        match event {
-            event_loop::Event::InboundRpc { rpc, channel } => {
-                event!(Level::INFO, "Responding to request.");
-
-                if let Some(objects) = self.state.rpc(rpc).await {
-                    self.network_client.respond_rpc(objects, channel).await;
-                }
-            }
-            e => todo!("{:?}", e),
-        };
-
-        Ok(())
     }
 
     async fn handle_command(&mut self, cmd: Command) -> Result<AppStatus, Box<dyn Error + Send + Sync>> {
@@ -123,13 +116,12 @@ pub struct AppControllerHandle {
 }
 
 impl AppControllerHandle {
-    pub fn new(network_client: Client, network_events: EventStream) -> Self {
+    pub fn new(network_client: Client) -> Self {
         let (tx, rx) = mpsc::channel(32);
 
         let mut mgr = AppController {
             state: AppStateHandle::new(),
             network_client,
-            network_events,
             rx,
         };
 

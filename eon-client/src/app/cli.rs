@@ -5,7 +5,7 @@ use crate::{
     app::{controller::*, repl::*},
     net::{
         event_loop::{self, Event},
-        network::{Client, EventStream},
+        network2::Client,
     },
     CliArgument,
 };
@@ -18,9 +18,9 @@ pub struct AppCli {
 }
 
 impl AppCli {
-    pub fn new(network_client: Client, events: EventStream) -> Self {
+    pub fn new(network_client: Client) -> Self {
         Self {
-            controller: AppControllerHandle::new(network_client, events),
+            controller: AppControllerHandle::new(network_client),
         }
     }
 

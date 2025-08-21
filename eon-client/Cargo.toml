@@ -10,6 +10,7 @@ release = false
 
 [dependencies]
 objects = { path = "../objects" }
+libp2p-invert = { path = "../libp2p-invert" }
 serde = { version = "1.0", features = ["derive"] }
 clap = { version = "4.5.6", features = ["derive"] }
 libp2p = { version = "0.56.0", features = ["tokio", "cbor", "dns", "kad", "noise", "macros", "request-response", "tcp", "websocket", "yamux", "identify"] }

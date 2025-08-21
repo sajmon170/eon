@@ -13,7 +13,7 @@ use tracing_appender::{non_blocking, non_blocking::WorkerGuard};
 use tracing::{Level, event};
 use anyhow::Result;
 
-use crate::{net::network, app::cli::AppCli};
+use crate::{net::network2, app::cli::AppCli};
 
 fn init_tracing(name: &str) -> Result<WorkerGuard> {
     let file = File::create(format!("{name}.log"))?;
@@ -55,11 +55,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     event!(Level::INFO, "Hello.");
 
-    let (mut network_client, network_events, network_event_loop) =
-        network::new(keypair, opt.bootstrap_mode).await?;
-
-    // Spawn the network task for it to run in the background.
-    spawn(network_event_loop.run());
+    let network_client =
+        network2::new(keypair, opt.bootstrap_mode).await?;
 
     // In case a listen address was provided use it, otherwise listen on any
     // address.
@@ -90,7 +87,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         event!(Level::INFO, "Finished bootstrapping.");
     }
 
-    let mut app = AppCli::new(network_client, network_events);
+    let mut app = AppCli::new(network_client);
     app.run().await?;
 
     Ok(())

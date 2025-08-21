@@ -38,13 +38,7 @@ pub(crate) struct ObjectRpc(pub TypedObject);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ObjectResponse(pub Vec<SignedObject>);
 
-/// Creates the network components, namely:
-///
-/// - The network client to interact with the network layer from anywhere within your application.
-///
-/// - The network event stream, e.g. for incoming requests.
-///
-/// - The network task driving the network itself.
+/// Creates the network client to interact with the network layer
 pub(crate) async fn new(
     id_keys: identity::Keypair,
     is_bootstrap: bool
@@ -104,19 +98,10 @@ pub(crate) async fn new(
 
     println!("Started node");
 
-    let (fn_sender, fn_receiver) = mpsc::channel(0);
-
     let control = swarm.behaviour().data_stream.new_control();
 
-    Ok(
-        Client {
-            keys: id_keys,
-            fn_sender
-        },
-    )
+    Ok(Client::new(swarm, id_keys).await)
 }
-
-pub type SwarmFn = Box<dyn FnOnce(&mut Swarm<Behaviour>) + Send + Sync>;
 
 #[swarm_client(Behaviour)]
 #[derive(Clone)]
@@ -308,6 +293,24 @@ impl Client {
             response = response_future => Ok(response.0),
             error = error_future => Err(Box::new(error))
         }
+    }
+
+    pub(crate) async fn on_object_request(&self) -> (TypedObject, ResponseChannel<ObjectResponse>) {
+        let (request, channel) = subscribe!(
+            _ => SwarmEvent::Behaviour(BehaviourEvent::ObjectExchange(
+                request_response::Event::Message {
+                    message: request_response::Message::Request {
+                        request,
+                        channel,
+                        ..
+                    },
+                    ..
+                },
+                ..
+            ))
+        ).await;
+        
+        (request.0, channel)
     }
 
     /// Respond to an object RPC
