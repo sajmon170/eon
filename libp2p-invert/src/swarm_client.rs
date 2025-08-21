@@ -16,7 +16,15 @@ pub fn impl_swarm_client(mut ast: syn::ItemStruct, name: syn::Ident) -> TokenStr
                 .parse2(quote! { fn_sender: tokio::sync::mpsc::Sender<EventLoopFn> })
                 .unwrap()
         );
+        fields.named.push(
+            syn::Field::parse_named
+                .parse2(quote! { cancel: tokio_util::sync::CancellationToken })
+                .unwrap()
+        );
     }
 
-    quote! { #ast }
+    quote! {
+        pub type EventLoopFn = Box<dyn FnOnce(&mut EventLoop) + Send + Sync>;
+        #ast
+    }
 }

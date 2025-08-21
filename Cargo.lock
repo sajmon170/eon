@@ -1687,6 +1687,7 @@ dependencies = [
  "quote",
  "syn",
  "syn_derive",
+ "tokio-util",
 ]
 
 [[package]]

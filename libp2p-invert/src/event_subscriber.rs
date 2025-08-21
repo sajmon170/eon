@@ -17,9 +17,21 @@ pub fn impl_event_subscriber(mut ast: syn::ItemImpl, name: syn::Ident) -> TokenS
 
         #event_loop
 
-        pub type EventLoopFn = Box<dyn FnOnce(&mut EventLoop) + Send + Sync>;
-
+        // This should be implemented in the swarm_client macro instead
+        // TODO: remove the keys hack
         impl #self_ty {
+            async fn new(swarm: libp2p::swarm::Swarm<Behaviour>, keys: libp2p::identity::Keypair) -> Self {
+                let (fn_sender, rx) = tokio::sync::mpsc::channel(0);
+                let cancel = tokio_util::sync::CancellationToken::new();
+                let _ = tokio::spawn(EventLoop::new(swarm, rx, cancel.clone()).run());
+
+                Self {
+                    fn_sender,
+                    keys,
+                    cancel
+                }
+            }
+            
             async fn register<T: Send + Sync + 'static>(
                 &self,
                 func: impl FnOnce(&mut libp2p::swarm::Swarm<Behaviour>) -> T + Send + Sync + 'static
@@ -43,6 +55,12 @@ pub fn impl_event_subscriber(mut ast: syn::ItemImpl, name: syn::Ident) -> TokenS
                 })).await;
 
                 rx
+            }
+        }
+
+        impl std::ops::Drop for #self_ty {
+            fn drop(&mut self) {
+                self.cancel.cancel();
             }
         }
     )
@@ -322,6 +340,7 @@ impl EventLoop {
                 pub swarm: libp2p::swarm::Swarm<Behaviour>,
                 pub pending: PendingQueries,
                 fn_receiver: tokio::sync::mpsc::Receiver<EventLoopFn>,
+                cancel: tokio_util::sync::CancellationToken
             }
         })
     }
@@ -347,12 +366,14 @@ impl EventLoop {
             impl EventLoop {
                 pub fn new(
                     swarm: libp2p::swarm::Swarm<Behaviour>,
-                    fn_receiver: tokio::sync::mpsc::Receiver<EventLoopFn>
+                    fn_receiver: tokio::sync::mpsc::Receiver<EventLoopFn>,
+                    cancel: tokio_util::sync::CancellationToken
                 ) -> Self {
                     Self {
                         swarm,
                         fn_receiver,
-                        pending: Default::default()
+                        pending: Default::default(),
+                        cancel
                     }
                 }
 
@@ -361,7 +382,7 @@ impl EventLoop {
                         tokio::select! {
                             Some(event) = futures::stream::StreamExt::next(&mut self.swarm) => self.handle_event(event).await,
                             Some(func) = self.fn_receiver.recv() => func(&mut self),
-                            else => return
+                            _ = self.cancel.cancelled() => return
                         }
                     }
                 }
