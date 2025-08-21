@@ -4,6 +4,7 @@ use syn::{
 };
 use quote::{quote, ToTokens, TokenStreamExt};
 use crate::tools;
+use itertools::Itertools;
 
 pub fn impl_event_subscriber(mut ast: syn::ItemImpl, name: syn::Ident) -> TokenStream {
     let mut visitor = SubscriberVisitor::default();
@@ -48,6 +49,7 @@ pub fn impl_event_subscriber(mut ast: syn::ItemImpl, name: syn::Ident) -> TokenS
 }
 
 // Corresponds to a single function that calls the subscribe! macro
+#[derive(PartialEq, Eq)]
 struct SubscribeQueue {
     name: syn::Ident,
     invocation: SubscribeInvocation
@@ -110,6 +112,7 @@ impl ToTokens for SubscribeQueue {
 }
 
 
+#[derive(PartialEq, Eq)]
 enum SubscribeInvocation {
     WithKey(SubscribeInvocationWithKey),
     WithoutKey(SubscribeInvocationWithoutKey)
@@ -128,6 +131,7 @@ impl Parse for SubscribeInvocation {
 }
 
 #[derive(syn_derive::Parse)]
+#[derive(PartialEq, Eq)]
 struct SubscribeInvocationWithoutKey {
     _underscore_token: Token![_],
     _fat_arrow_token: Token![=>],
@@ -135,6 +139,7 @@ struct SubscribeInvocationWithoutKey {
 }
 
 #[derive(syn_derive::Parse)]
+#[derive(PartialEq, Eq)]
 struct SubscribeInvocationWithKey {
     query_id: syn::Ident,
     _colon_token: Token![:],
@@ -143,6 +148,7 @@ struct SubscribeInvocationWithKey {
     pattern: EventLoopPatternWithKey
 }
 
+#[derive(PartialEq, Eq)]
 struct EventLoopPatternWithKey {
     query_key: syn::Member,
     pattern: syn::Pat,
@@ -176,6 +182,7 @@ impl Parse for EventLoopPatternWithKey {
     }
 }
 
+#[derive(PartialEq, Eq)]
 struct EventLoopPatternWithoutKey {
     pattern: syn::Pat,
     output: Vec<syn::Member>
@@ -292,8 +299,12 @@ impl EventLoop {
         let with_key_db_types = self.get_invocations_with_keys()
             .map(|invocation| &invocation.query_type);
 
+        let (with_key_db_items, with_key_db_types): (Vec<_>, Vec<_>) =
+            with_key_db_items.zip(with_key_db_types).unique().unzip();
+
         let without_key_db_items = self.get_queues_without_keys()
-            .map(|queue| tools::member_case(&queue.name));
+            .map(|queue| tools::member_case(&queue.name))
+            .unique();
 
         // TODO - make the behaviour generic
         tokens.append_all(quote! {
@@ -415,7 +426,9 @@ impl VisitMut for SubscriberVisitor {
                 let context = self.current_fn.as_ref().unwrap().clone();
                 let queue = SubscribeQueue::new(context, invocation);
                 *node = parse_quote!(#queue);
-                self.event_loop.queues.push(queue);
+                if !self.event_loop.queues.contains(&queue) {
+                    self.event_loop.queues.push(queue);
+                }
             }
         }
         visit_mut::visit_expr_mut(self, node);
