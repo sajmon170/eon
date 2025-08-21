@@ -316,27 +316,21 @@ impl EventLoop {
     }
 
     fn append_event_loop_impl(&self, tokens: &mut TokenStream) {
-        let names = self.queues
-            .iter()
+        let key_names = self.get_queues_with_keys()
             .map(|queue| tools::member_case(&queue.name));
 
-        let with_keys = self.queues
-            .iter()
-            .filter_map(|queue| {
-                if let SubscribeInvocation::WithKey(invocation) = &queue.invocation {
-                    Some(invocation)
-                }
-                else {
-                    None
-                }
-            });        
-
-        let patterns = with_keys
-            .clone()
+        let key_patterns = self.get_invocations_with_keys()
             .map(|invocation| &invocation.pattern.pattern);
         
-        let keys = with_keys
+        let keys = self.get_invocations_with_keys()
             .map(|invocation| &invocation.pattern.query_key);
+
+        let other_names = self.get_queues_without_keys()
+            .map(|queue| tools::member_case(&queue.name));
+
+        let other_patterns = self.get_invocations_without_keys()
+            .map(|invocation| &invocation.pattern.pattern);
+        
         
         tokens.append_all(quote! {
             impl EventLoop {
@@ -363,14 +357,24 @@ impl EventLoop {
 
                 async fn handle_event(&mut self, event: libp2p::swarm::SwarmEvent<BehaviourEvent>) {
                     match &event {
-                        #(#patterns => {
+                        #(#key_patterns => {
                             let sender = self
                                 .pending
-                                .#names
+                                .#key_names
                                 .remove(&#keys)
                                 .unwrap();
                             
                             let _ = sender.send(event);
+                        })*
+                        #(#other_patterns => {
+                            let sender = self
+                                .pending
+                                .#other_names
+                                .take()
+                                .unwrap();
+                            
+                            let _ = sender.send(event);
+                            
                         })*
                         _ => {}
                     }
