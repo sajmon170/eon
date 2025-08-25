@@ -21,7 +21,7 @@ pub fn impl_event_subscriber(mut ast: syn::ItemImpl, name: syn::Ident) -> TokenS
         // TODO: remove the keys hack
         impl #self_ty {
             async fn new(swarm: libp2p::swarm::Swarm<Behaviour>, keys: libp2p::identity::Keypair) -> Self {
-                let (fn_sender, rx) = tokio::sync::mpsc::channel(10);
+                let (fn_sender, rx) = tokio::sync::mpsc::channel(1);
                 let cancel = tokio_util::sync::CancellationToken::new();
                 let _ = tokio::spawn(EventLoop::new(swarm, rx, cancel.clone()).run());
 
@@ -299,7 +299,7 @@ impl EventLoop {
     }
     
     fn get_invocations_without_keys(&self) -> impl Iterator<Item = &SubscribeInvocationWithoutKey> {
-        self.get_queues_with_keys()
+        self.get_queues_without_keys()
             .filter_map(|queue| {
                 if let SubscribeInvocation::WithoutKey(invocation) = &queue.invocation {
                     Some(invocation)
