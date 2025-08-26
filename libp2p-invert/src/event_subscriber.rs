@@ -360,6 +360,10 @@ impl EventLoop {
         let key_names = self.get_queues_with_keys()
             .map(|queue| tools::member_case(&queue.name));
 
+        let key_buffers = self.get_queues_with_keys()
+            .map(|queue| tools::member_case(&queue.name))
+            .map(|item| format_ident!("{item}_buffer"));
+
         let key_patterns = self.get_invocations_with_keys()
             .map(|invocation| &invocation.pattern.pattern);
         
@@ -368,6 +372,10 @@ impl EventLoop {
 
         let other_names = self.get_queues_without_keys()
             .map(|queue| tools::member_case(&queue.name));
+
+        let other_buffers = self.get_queues_without_keys()
+            .map(|queue| tools::member_case(&queue.name))
+            .map(|item| format_ident!("{item}_buffer"));
 
         let other_patterns = self.get_invocations_without_keys()
             .map(|invocation| &invocation.pattern.pattern);
@@ -401,22 +409,34 @@ impl EventLoop {
                 async fn handle_event(&mut self, event: libp2p::swarm::SwarmEvent<BehaviourEvent>) {
                     match &event {
                         #(#key_patterns => {
-                            let sender = self
+                            let out = self
                                 .pending
                                 .#key_names
-                                .remove(&#keys)
-                                .unwrap();
-                            
-                            let _ = sender.send(event);
+                                .remove(&#keys);
+
+                            if let Some(sender) = out {
+                                let _ = sender.send(event);
+                            }
+                            else {
+                                self.pending
+                                    .#key_buffers
+                                    .insert(*#keys, event);
+                            }
                         })*
                         #(#other_patterns => {
-                            let sender = self
+                            let out = self
                                 .pending
                                 .#other_names
-                                .take()
-                                .unwrap();
+                                .take();
                             
-                            let _ = sender.send(event);
+                            if let Some(sender) = out {
+                                let _ = sender.send(event);
+                            }
+                            else {
+                                self.pending
+                                    .#other_buffers
+                                    .push(event);
+                            }
                             
                         })*
                         _ => {}
