@@ -4,5 +4,4 @@ members = [
     "eon-client",
     "libp2p-invert",
     "objects",
-    "testing"
 ]
