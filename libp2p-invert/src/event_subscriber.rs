@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use syn::{
     parse::{Parse, ParseStream}, parse_quote, visit_mut::{self, VisitMut}, Attribute, Pat, Result, Token
 };
-use quote::{quote, ToTokens, TokenStreamExt};
+use quote::{format_ident, quote, ToTokens, TokenStreamExt};
 use crate::tools;
 use itertools::Itertools;
 
@@ -320,16 +320,27 @@ impl EventLoop {
         let (with_key_db_items, with_key_db_types): (Vec<_>, Vec<_>) =
             with_key_db_items.zip(with_key_db_types).unique().unzip();
 
+        let with_key_db_item_buffer = with_key_db_items
+            .iter()
+            .map(|item| format_ident!("{}_buffer", item));
+
         let without_key_db_items = self.get_queues_without_keys()
             .map(|queue| tools::member_case(&queue.name))
             .unique();
+
+        let without_key_db_item_buffer = self.get_queues_without_keys()
+            .map(|queue| tools::member_case(&queue.name))
+            .unique()
+            .map(|item| format_ident!("{}_buffer", item));
 
         // TODO - make the behaviour generic
         tokens.append_all(quote! {
             #[derive(Default)]
             pub(crate) struct PendingQueries {
                 #(pub #with_key_db_items: HashMap<#with_key_db_types, tokio::sync::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>> ,)*
-                #(pub #without_key_db_items: Option<tokio::sync::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>>),*
+                #(pub #with_key_db_item_buffer: HashMap<#with_key_db_types, libp2p::swarm::SwarmEvent<BehaviourEvent>> ,)*
+                #(pub #without_key_db_items: Option<tokio::sync::oneshot::Sender<libp2p::swarm::SwarmEvent<BehaviourEvent>>> ,)*
+                #(pub #without_key_db_item_buffer: Vec<libp2p::swarm::SwarmEvent<BehaviourEvent>>),*
             }
         });
     }
