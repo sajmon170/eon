@@ -86,6 +86,7 @@ fn stringify<T: ToTokens>(node: &T) -> String {
 impl ToTokens for SubscribeQueue {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let name = tools::member_case(&self.name);
+        let buffer = format_ident!("{name}_buffer");
         
         let output = match &self.invocation {
             SubscribeInvocation::WithKey(invocation) => {
@@ -96,7 +97,12 @@ impl ToTokens for SubscribeQueue {
                 quote! {
                     async {
                         let rx = self.add_pending(move |db, sender| {
-                            db.#name.insert(#query_id, sender);
+                            if let Some(out) = db.#buffer.remove(&#query_id) {
+                                sender.send(out);
+                            }
+                            else {
+                                db.#name.insert(#query_id, sender);
+                            }
                         }).await;
 
                         match rx.await.unwrap() {
@@ -113,7 +119,12 @@ impl ToTokens for SubscribeQueue {
                 quote! {
                     async {
                         let rx = self.add_pending(move |db, sender| {
-                            db.#name.insert(sender);
+                            if let Some(out) = db.#buffer.pop() {
+                                sender.send(out);
+                            }
+                            else {
+                                db.#name.insert(sender);
+                            }
                         }).await;
 
                         match rx.await.unwrap() {
