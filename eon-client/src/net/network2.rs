@@ -111,10 +111,10 @@ pub(crate) struct Client {
 
 #[event_subscriber(Behaviour)]
 impl Client {
-    pub(crate) async fn on_identify_received(&self) {
+    pub(crate) async fn on_identify_received(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let (peer_id, info) = subscribe!(_ => SwarmEvent::Behaviour(BehaviourEvent::Identify(
             identify::Event::Received { peer_id, info, .. }
-        ))).await;
+        ))).await?;
 
         self.register(move |swarm| {
             for addr in info.listen_addrs {
@@ -123,6 +123,8 @@ impl Client {
                 swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
             }
         });
+
+        Ok(())
     }
     
     pub(crate) async fn bootstrap(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -131,7 +133,7 @@ impl Client {
                 result: kad::QueryResult::Bootstrap(result),
                 ..
             }
-        ))).await;
+        ))).await?;
 
         Ok(())
     }
@@ -156,22 +158,26 @@ impl Client {
         }
     }
 
-    async fn get_connection_established(&self, id: PeerId) -> ConnectedPoint {
-        subscribe!(id: PeerId => SwarmEvent::ConnectionEstablished {
+    async fn get_connection_established(&self, id: PeerId) -> Result<ConnectedPoint, Box<dyn Error + Send + Sync>> {
+        let out = subscribe!(id: PeerId => SwarmEvent::ConnectionEstablished {
             #[key] peer_id,
             endpoint,
             ..
-        }).await
+        }).await?;
+
+        Ok(out)
     }
 
     // This function might hang indefinitely!
-    async fn get_outgoing_connection_error(&self, id: PeerId) -> DialError {
+    async fn get_outgoing_connection_error(&self, id: PeerId) -> Result<DialError, Box<dyn Error + Send + Sync>> {
         let id = Some(id);
-        subscribe!(id: Option<PeerId> => SwarmEvent::OutgoingConnectionError {
+        let out = subscribe!(id: Option<PeerId> => SwarmEvent::OutgoingConnectionError {
             #[key] peer_id,
             error,
             ..
-        }).await
+        }).await?;
+
+        Ok(out)
     }
 
     /// Dial the given peer at the given address.
@@ -191,12 +197,12 @@ impl Client {
 
         loop {
             tokio::select! {
-                endpoint = self.get_connection_established(peer_id.clone()) => {
+                Ok(endpoint) = self.get_connection_established(peer_id.clone()) => {
                     if endpoint.is_dialer() {
                         break Ok(())
                     }
                 },
-                error = self.get_outgoing_connection_error(peer_id.clone()) => {
+                Ok(error) = self.get_outgoing_connection_error(peer_id.clone()) => {
                     break Err(error)
                 }
             }
@@ -222,7 +228,7 @@ impl Client {
                 result: kad::QueryResult::StartProviding(_),
                 ..
             }
-        ))).await;
+        ))).await?;
 
         Ok(())
     }
@@ -247,7 +253,7 @@ impl Client {
                     })),
                 ..
             }
-        ))).await;
+        ))).await?;
 
         Ok(providers)
     }
@@ -290,12 +296,12 @@ impl Client {
         );
         
         tokio::select! {
-            response = response_future => Ok(response.0),
-            error = error_future => Err(Box::new(error))
+            Ok(response) = response_future => Ok(response.0),
+            Ok(error) = error_future => Err(Box::new(error))
         }
     }
 
-    pub(crate) async fn on_object_request(&self) -> (TypedObject, ResponseChannel<ObjectResponse>) {
+    pub(crate) async fn on_object_request(&self) -> Result<(TypedObject, ResponseChannel<ObjectResponse>), Box<dyn Error + Send + Sync>> {
         let (request, channel) = subscribe!(
             _ => SwarmEvent::Behaviour(BehaviourEvent::ObjectExchange(
                 request_response::Event::Message {
@@ -308,9 +314,9 @@ impl Client {
                 },
                 ..
             ))
-        ).await;
+        ).await?;
         
-        (request.0, channel)
+        Ok((request.0, channel))
     }
 
     /// Respond to an object RPC

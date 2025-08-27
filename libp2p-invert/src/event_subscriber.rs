@@ -105,10 +105,12 @@ impl ToTokens for SubscribeQueue {
                             }
                         }).await;
 
-                        match rx.await.unwrap() {
-                            #pattern => (#(#output),*),
-                            _ => panic!()
-                        }
+                        rx.await.map(|out| {
+                            match out {
+                                #pattern => (#(#output),*),
+                                _ => panic!()
+                            }
+                        })
                     }
                 }
             }
@@ -127,10 +129,12 @@ impl ToTokens for SubscribeQueue {
                             }
                         }).await;
 
-                        match rx.await.unwrap() {
-                            #pattern => (#(#output),*),
-                            _ => panic!()
-                        }
+                        rx.await.map(|out| {
+                            match out {
+                                #pattern => (#(#output),*),
+                                _ => panic!()
+                            }
+                        })
                     }
                 }
             }

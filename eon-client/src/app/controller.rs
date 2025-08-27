@@ -35,8 +35,8 @@ impl AppController {
         loop {
             tokio::select! {
                 //Some(event) = self.network_events.next() => self.handle_event(event).await.unwrap(),
-                _ = self.network_client.on_identify_received() => { },
-                (rpc, channel) = self.network_client.on_object_request() => {
+                Ok(_) = self.network_client.on_identify_received() => { },
+                Ok((rpc, channel)) = self.network_client.on_object_request() => {
                     event!(Level::INFO, "Responding to request.");
 
                     if let Some(objects) = self.state.rpc(rpc).await {
