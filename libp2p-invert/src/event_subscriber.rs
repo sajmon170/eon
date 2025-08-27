@@ -4,7 +4,6 @@ use syn::{
 };
 use quote::{format_ident, quote, ToTokens, TokenStreamExt};
 use crate::tools;
-use itertools::Itertools;
 
 pub fn impl_event_subscriber(mut ast: syn::ItemImpl, name: syn::Ident) -> TokenStream {
     let mut visitor = SubscriberVisitor::default();
@@ -329,23 +328,19 @@ impl EventLoop {
         let with_key_db_items = self.get_queues_with_keys()
             .map(|queue| tools::member_case(&queue.name));
 
-        let with_key_db_types = self.get_invocations_with_keys()
-            .map(|invocation| &invocation.query_type);
+        let with_key_db_types: Vec<_> = self.get_invocations_with_keys()
+            .map(|invocation| &invocation.query_type)
+            .collect();
 
-        let (with_key_db_items, with_key_db_types): (Vec<_>, Vec<_>) =
-            with_key_db_items.zip(with_key_db_types).unique().unzip();
-
-        let with_key_db_item_buffer = with_key_db_items
-            .iter()
+        let with_key_db_item_buffer = self.get_queues_with_keys()
+            .map(|queue| tools::member_case(&queue.name))
             .map(|item| format_ident!("{}_buffer", item));
 
         let without_key_db_items = self.get_queues_without_keys()
-            .map(|queue| tools::member_case(&queue.name))
-            .unique();
+            .map(|queue| tools::member_case(&queue.name));
 
         let without_key_db_item_buffer = self.get_queues_without_keys()
             .map(|queue| tools::member_case(&queue.name))
-            .unique()
             .map(|item| format_ident!("{}_buffer", item));
 
         // TODO - make the behaviour generic
@@ -475,22 +470,27 @@ impl ToTokens for EventLoop {
 #[derive(Default)]
 struct SubscriberVisitor {
     current_fn: Option<syn::Ident>,
+    invocation_count: u64,
     event_loop: EventLoop
 }
 
 impl VisitMut for SubscriberVisitor {
     fn visit_impl_item_fn_mut(&mut self, node: &mut syn::ImplItemFn) {
         self.current_fn = Some(node.sig.ident.clone());
+        self.invocation_count = 0;
         visit_mut::visit_impl_item_fn_mut(self, node);
     }
     
     fn visit_expr_mut(&mut self, node: &mut syn::Expr) {
         if let syn::Expr::Macro(expr) = node {
             if expr.mac.path.is_ident("subscribe") {
+                self.invocation_count += 1;
                 let invocation: SubscribeInvocation = expr.mac
                     .parse_body()
                     .unwrap();
-                let context = self.current_fn.as_ref().unwrap().clone();
+                let context = format_ident!(
+                    "{}_{}", self.current_fn.as_ref().unwrap(), self.invocation_count
+                );
                 let queue = SubscribeQueue::new(context, invocation);
                 *node = parse_quote!(#queue);
                 if !self.event_loop.queues.contains(&queue) {
