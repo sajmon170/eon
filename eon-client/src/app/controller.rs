@@ -1,9 +1,7 @@
 use crate::{
     app::{repl::*, state::AppStateHandle},
     net::{
-        //event_loop::{self, Event},
-        //network::{Client, EventStream},
-        network2::Client
+        network::Client
     },
 };
 use anyhow::Result;

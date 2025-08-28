@@ -3,10 +3,7 @@ use std::io::prelude::*;
 
 use crate::{
     app::{controller::*, repl::*},
-    net::{
-        event_loop::{self, Event},
-        network2::Client,
-    },
+    net::network::Client,
     CliArgument,
 };
 
