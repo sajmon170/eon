@@ -1,8 +1,6 @@
 use crate::{
     app::{repl::*, state::AppStateHandle},
-    net::{
-        network::Client
-    },
+    net::network::Client,
 };
 use anyhow::Result;
 use base64::prelude::*;
@@ -46,7 +44,10 @@ impl AppController {
         }
     }
 
-    async fn handle_command(&mut self, cmd: Command) -> Result<AppStatus, Box<dyn Error + Send + Sync>> {
+    async fn handle_command(
+        &mut self,
+        cmd: Command,
+    ) -> Result<AppStatus, Box<dyn Error + Send + Sync>> {
         let event: Option<AppStatus> = match cmd {
             Command::Provide { path } => {
                 let file = BinaryFile::new(&path);

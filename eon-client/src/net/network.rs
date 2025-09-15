@@ -4,12 +4,15 @@ use std::{
     time::Duration,
 };
 
-use futures::{
-    prelude::*,
-    StreamExt,
-};
+use futures::{prelude::*, StreamExt};
 use libp2p::{
-    core::{ConnectedPoint, Multiaddr}, identify, identity, kad, multiaddr::Protocol, noise, request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel}, swarm::{self, DialError, NetworkBehaviour, Swarm, SwarmEvent}, tcp, yamux, PeerId, StreamProtocol
+    core::{ConnectedPoint, Multiaddr},
+    identify, identity, kad,
+    multiaddr::Protocol,
+    noise,
+    request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel},
+    swarm::{self, DialError, NetworkBehaviour, Swarm, SwarmEvent},
+    tcp, yamux, PeerId, StreamProtocol,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{event, Level};
@@ -29,7 +32,7 @@ pub(crate) struct Behaviour {
     pub object_exchange: request_response::cbor::Behaviour<ObjectRpc, ObjectResponse>,
     pub data_stream: libp2p_stream::Behaviour,
     pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
-    pub identify: identify::Behaviour
+    pub identify: identify::Behaviour,
 }
 
 // Simple file exchange protocol
@@ -41,10 +44,10 @@ pub(crate) struct ObjectResponse(pub Vec<SignedObject>);
 /// Creates the network client to interact with the network layer
 pub(crate) async fn new(
     id_keys: identity::Keypair,
-    is_bootstrap: bool
+    is_bootstrap: bool,
 ) -> Result<Client, Box<dyn Error + Send + Sync>> {
     let peer_id = id_keys.public().to_peer_id();
-    
+
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys.clone())
         .with_tokio()
         .with_tcp(
@@ -66,9 +69,9 @@ pub(crate) async fn new(
             ),
             identify: identify::Behaviour::new(identify::Config::new(
                 String::from("liberum/id/1.0.0"),
-                key.public()
+                key.public(),
             )),
-            data_stream: libp2p_stream::Behaviour::new()
+            data_stream: libp2p_stream::Behaviour::new(),
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
@@ -84,15 +87,15 @@ pub(crate) async fn new(
 
     if !is_bootstrap {
         let bootstrap_id: PeerId = "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X"
-            .parse().unwrap();
+            .parse()
+            .unwrap();
         let bootstrap_addr: Multiaddr = "/ip4/127.0.0.1/tcp/22137".parse()?;
 
-        swarm
-            .behaviour_mut()
-            .kademlia
-            .add_address(&bootstrap_id, bootstrap_addr.clone().with(Protocol::P2p(bootstrap_id)));
-    }
-    else {
+        swarm.behaviour_mut().kademlia.add_address(
+            &bootstrap_id,
+            bootstrap_addr.clone().with(Protocol::P2p(bootstrap_id)),
+        );
+    } else {
         println!("Bootstrap node!");
     }
 
@@ -114,26 +117,30 @@ impl Client {
     pub(crate) async fn on_identify_received(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let (peer_id, info) = subscribe!(_ => SwarmEvent::Behaviour(BehaviourEvent::Identify(
             identify::Event::Received { peer_id, info, .. }
-        ))).await?;
+        )))
+        .await?;
 
         self.register(move |swarm| {
             for addr in info.listen_addrs {
-                event!(Level::INFO,
-                        "Found new listen addr: {addr} for peer: {peer_id}");
+                event!(
+                    Level::INFO,
+                    "Found new listen addr: {addr} for peer: {peer_id}"
+                );
                 swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
             }
         });
 
         Ok(())
     }
-    
+
     pub(crate) async fn bootstrap(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let _ = subscribe!(_ => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
             kad::Event::OutboundQueryProgressed {
                 result: kad::QueryResult::Bootstrap(result),
                 ..
             }
-        ))).await?;
+        )))
+        .await?;
 
         Ok(())
     }
@@ -141,41 +148,46 @@ impl Client {
     pub fn get_keys(&self) -> &identity::Keypair {
         &self.keys
     }
-    
+
     /// Listen for incoming connections on the given address.
     pub(crate) async fn start_listening(
         &self,
         addr: Multiaddr,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let status = self.register(move |swarm| {
-            swarm
-                .listen_on(addr)
-        }).await?;
+        let status = self.register(move |swarm| swarm.listen_on(addr)).await?;
 
         match status {
             Ok(_) => Ok(()),
-            Err(e) => Err(Box::new(e))
+            Err(e) => Err(Box::new(e)),
         }
     }
 
-    async fn get_connection_established(&self, id: PeerId) -> Result<ConnectedPoint, Box<dyn Error + Send + Sync>> {
+    async fn get_connection_established(
+        &self,
+        id: PeerId,
+    ) -> Result<ConnectedPoint, Box<dyn Error + Send + Sync>> {
         let out = subscribe!(id: PeerId => SwarmEvent::ConnectionEstablished {
             #[key] peer_id,
             endpoint,
             ..
-        }).await?;
+        })
+        .await?;
 
         Ok(out)
     }
 
     // This function might hang indefinitely!
-    async fn get_outgoing_connection_error(&self, id: PeerId) -> Result<DialError, Box<dyn Error + Send + Sync>> {
+    async fn get_outgoing_connection_error(
+        &self,
+        id: PeerId,
+    ) -> Result<DialError, Box<dyn Error + Send + Sync>> {
         let id = Some(id);
         let out = subscribe!(id: Option<PeerId> => SwarmEvent::OutgoingConnectionError {
             #[key] peer_id,
             error,
             ..
-        }).await?;
+        })
+        .await?;
 
         Ok(out)
     }
@@ -186,14 +198,16 @@ impl Client {
         peer_id: PeerId,
         peer_addr: Multiaddr,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let _ = self.register(move |swarm| {
-            swarm
-                .behaviour_mut()
-                .kademlia
-                .add_address(&peer_id, peer_addr.clone());
+        let _ = self
+            .register(move |swarm| {
+                swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .add_address(&peer_id, peer_addr.clone());
 
-            swarm.dial(peer_addr.with(Protocol::P2p(peer_id.clone())))
-        }).await?;
+                swarm.dial(peer_addr.with(Protocol::P2p(peer_id.clone())))
+            })
+            .await?;
 
         loop {
             tokio::select! {
@@ -212,15 +226,19 @@ impl Client {
     }
 
     /// Advertise the local node as the provider of the given file on the DHT.
-    pub(crate) async fn start_providing(&self, object: ObjectId)
-        -> Result<(), Box<dyn Error + Send + Sync>> {
-        let query_id = self.register(move |swarm| {
-            swarm
-                .behaviour_mut()
-                .kademlia
-                .start_providing(Vec::from(object).into())
-                .expect("No store error.")
-        }).await?;
+    pub(crate) async fn start_providing(
+        &self,
+        object: ObjectId,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let query_id = self
+            .register(move |swarm| {
+                swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .start_providing(Vec::from(object).into())
+                    .expect("No store error.")
+            })
+            .await?;
 
         let _ = subscribe!(query_id: QueryId => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
             kad::Event::OutboundQueryProgressed {
@@ -228,32 +246,39 @@ impl Client {
                 result: kad::QueryResult::StartProviding(_),
                 ..
             }
-        ))).await?;
+        )))
+        .await?;
 
         Ok(())
     }
 
     /// Find the providers for the given file on the DHT.
-    pub(crate) async fn get_providers(&self, object: ObjectId)
-        -> Result<HashSet<PeerId>, Box<dyn Error + Send + Sync>> {
-        let query_id = self.register(move |swarm| {
-            swarm
-                .behaviour_mut()
-                .kademlia
-                .get_providers(Vec::from(object).into())
-        }).await?;
+    pub(crate) async fn get_providers(
+        &self,
+        object: ObjectId,
+    ) -> Result<HashSet<PeerId>, Box<dyn Error + Send + Sync>> {
+        let query_id = self
+            .register(move |swarm| {
+                swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .get_providers(Vec::from(object).into())
+            })
+            .await?;
 
-        let providers = subscribe!(query_id: QueryId => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
-            kad::Event::OutboundQueryProgressed {
-                #[key] id,
-                result:
-                    kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders {
-                        providers,
-                        ..
-                    })),
-                ..
-            }
-        ))).await?;
+        let providers =
+            subscribe!(query_id: QueryId => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
+                kad::Event::OutboundQueryProgressed {
+                    #[key] id,
+                    result:
+                        kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders {
+                            providers,
+                            ..
+                        })),
+                    ..
+                }
+            )))
+            .await?;
 
         Ok(providers)
     }
@@ -264,12 +289,14 @@ impl Client {
         peer: PeerId,
         rpc: TypedObject,
     ) -> Result<Vec<SignedObject>, Box<dyn Error + Send + Sync>> {
-        let request_id = self.register(move |swarm| {
-            swarm
-                .behaviour_mut()
-                .object_exchange
-                .send_request(&peer, ObjectRpc(rpc))
-        }).await?;
+        let request_id = self
+            .register(move |swarm| {
+                swarm
+                    .behaviour_mut()
+                    .object_exchange
+                    .send_request(&peer, ObjectRpc(rpc))
+            })
+            .await?;
 
         let id = request_id.clone();
         let response_future = subscribe!(
@@ -294,14 +321,16 @@ impl Client {
                 }
             ))
         );
-        
+
         tokio::select! {
             Ok(response) = response_future => Ok(response.0),
             Ok(error) = error_future => Err(Box::new(error))
         }
     }
 
-    pub(crate) async fn on_object_request(&self) -> Result<(TypedObject, ResponseChannel<ObjectResponse>), Box<dyn Error + Send + Sync>> {
+    pub(crate) async fn on_object_request(
+        &self,
+    ) -> Result<(TypedObject, ResponseChannel<ObjectResponse>), Box<dyn Error + Send + Sync>> {
         let (request, channel) = subscribe!(
             _ => SwarmEvent::Behaviour(BehaviourEvent::ObjectExchange(
                 request_response::Event::Message {
@@ -314,8 +343,9 @@ impl Client {
                 },
                 ..
             ))
-        ).await?;
-        
+        )
+        .await?;
+
         Ok((request.0, channel))
     }
 
@@ -325,13 +355,15 @@ impl Client {
         response: Vec<SignedObject>,
         channel: ResponseChannel<ObjectResponse>,
     ) {
-        let _ = self.register(move |swarm| {
-            swarm
-                .behaviour_mut()
-                .object_exchange
-                .send_response(channel, ObjectResponse(response))
-                .expect("Connection to peer to be still open.");
-        }).await;
+        let _ = self
+            .register(move |swarm| {
+                swarm
+                    .behaviour_mut()
+                    .object_exchange
+                    .send_response(channel, ObjectResponse(response))
+                    .expect("Connection to peer to be still open.");
+            })
+            .await;
     }
 
     pub(crate) async fn open_stream(&self, hash: Hash, id: PeerId) {
