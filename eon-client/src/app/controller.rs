@@ -11,7 +11,7 @@ use libp2p::{
     multiaddr::Protocol,
 };
 use objects::{prelude::*, system};
-use std::{collections::HashSet, error::Error, fs::File, io::Write, path::PathBuf, sync::Mutex};
+use std::{collections::HashSet, error::Error, fs::File, io::Write, path::PathBuf, sync::{Arc, Mutex}};
 use tokio::{sync::mpsc, task::spawn};
 use tracing::{event, Level};
 
@@ -55,7 +55,7 @@ impl AppController {
             .await?.ok()
     }
 
-    async fn drive_query_for_single_peer(&self, obj: ObjectId, peer: PeerId, filter: Mutex<HashSet<PeerId>>)
+    async fn drive_query_for_single_peer(&self, obj: ObjectId, peer: PeerId, filter: Arc<Mutex<HashSet<PeerId>>>)
                                          -> Option<HashSet<PeerId>> {
         let mut peers_to_ask = HashSet::from([peer]);
 
@@ -73,11 +73,24 @@ impl AppController {
         None
     }
 
-    async fn get_providers(&self, obj_id: ObjectId) -> Result<HashSet<PeerId>, Box<dyn Error + Send + Sync>>{
-        //self.network_client.get
+    async fn get_providers(&self, obj_id: ObjectId) -> Result<HashSet<PeerId>, Box<dyn Error + Send + Sync>> {
+        const PARALLEL_FACTOR: usize = 3;
+
         let my_id = self.network_client.get_peer_id();
-        let mut closest = self.network_client.find_closest_local_peers(obj_id, my_id);
-        Ok(Default::default())
+        let filter = Arc::new(Mutex::new(HashSet::new()));
+        let out = self.network_client
+            .find_closest_local_peers(obj_id, my_id)
+            .await
+            .into_iter()
+            .take(PARALLEL_FACTOR)
+            .map(|peer| self.drive_query_for_single_peer(obj_id, peer.node_id, filter.clone()))
+            .collect::<FuturesUnordered<_>>()
+            .next()
+            .await
+            .ok_or("None of the queries finished")?
+            .ok_or("No providers found")?;
+
+        Ok(out)
     }
 
     async fn handle_command(
