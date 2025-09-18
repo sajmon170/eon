@@ -11,7 +11,14 @@ use libp2p::{
     multiaddr::Protocol,
 };
 use objects::{prelude::*, system};
-use std::{collections::HashSet, error::Error, fs::File, io::Write, path::PathBuf, sync::{Arc, Mutex}};
+use std::{
+    collections::HashSet,
+    error::Error,
+    fs::File,
+    io::Write,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tokio::{sync::mpsc, task::spawn};
 use tracing::{event, Level};
 
@@ -44,55 +51,75 @@ impl AppController {
         }
     }
 
-    async fn get_first_fastkad_response(&self, obj: ObjectId, peers: HashSet<PeerId>)
-        -> Option<(PeerId, KadResponse)> {
-        let response_futures = peers
-            .into_iter()
-            .map(|peer| async move {
-                let response = self.network_client
-                    .send_fastkad_rpc(peer, KadRequest { id: obj }).await?;
+    async fn get_first_fastkad_response(
+        &self,
+        obj: ObjectId,
+        peers: HashSet<PeerId>,
+    ) -> Option<(PeerId, KadResponse)> {
+        let response_futures = peers.into_iter().map(|peer| {
+            async move {
+                let response = self
+                    .network_client
+                    .send_fastkad_rpc(peer, KadRequest { id: obj })
+                    .await?;
 
                 Result::<(PeerId, KadResponse), Box<dyn Error + Send + Sync>>::Ok((peer, response))
-            }.boxed());
+            }
+            .boxed()
+        });
 
-        futures::future::select_ok(response_futures).await.ok().map(|res| res.0)
+        futures::future::select_ok(response_futures)
+            .await
+            .ok()
+            .map(|res| res.0)
     }
 
-    async fn drive_query_for_single_peer(&self, obj: ObjectId, peer: PeerId, visited_peers: Arc<Mutex<HashSet<PeerId>>>)
-                                         -> Option<HashSet<PeerId>> {
+    async fn drive_query_for_single_peer(
+        &self,
+        obj: ObjectId,
+        peer: PeerId,
+        visited_peers: Arc<Mutex<HashSet<PeerId>>>,
+    ) -> Option<HashSet<PeerId>> {
         let mut peers_to_ask = HashSet::from([peer]);
 
         while let Some((peer_id, out)) = self.get_first_fastkad_response(obj, peers_to_ask).await {
             peers_to_ask = {
                 let mut visited = visited_peers.lock().unwrap();
-                let result: HashSet<PeerId> = out.closer_peers.difference(&visited).cloned().collect();
+                let result: HashSet<PeerId> =
+                    out.closer_peers.difference(&visited).cloned().collect();
                 visited.insert(peer_id);
 
                 result
             };
-            
+
             if !out.shortcut_peers.is_empty() {
-                return Some(out.shortcut_peers)
+                return Some(out.shortcut_peers);
             }
             if !out.provider_peers.is_empty() {
-                return Some(out.provider_peers)
+                return Some(out.provider_peers);
             }
         }
 
         None
     }
 
-    async fn get_providers(&self, obj_id: ObjectId) -> Result<HashSet<PeerId>, Box<dyn Error + Send + Sync>> {
+    async fn get_providers(
+        &self,
+        obj_id: ObjectId,
+    ) -> Result<HashSet<PeerId>, Box<dyn Error + Send + Sync>> {
         const PARALLEL_FACTOR: usize = 3;
 
         let my_id = self.network_client.get_peer_id();
         let visited_peers = Arc::new(Mutex::new(HashSet::new()));
-        let out = self.network_client
+        let out = self
+            .network_client
             .find_closest_local_peers(obj_id, my_id)
             .await
             .into_iter()
             .take(PARALLEL_FACTOR)
-            .map(|peer| self.drive_query_for_single_peer(obj_id, peer.node_id, visited_peers.clone()))
+            .map(|peer| {
+                self.drive_query_for_single_peer(obj_id, peer.node_id, visited_peers.clone())
+            })
             .collect::<FuturesUnordered<_>>()
             .next()
             .await
