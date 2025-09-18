@@ -45,42 +45,32 @@ impl AppController {
     }
 
     async fn get_first_fastkad_response(&self, obj: ObjectId, peers: HashSet<PeerId>)
-        -> Result<KadResponse, Box<dyn Error + Send + Sync>> {
+        -> Option<KadResponse> {
         peers
             .into_iter()
             .map(|peer| self.network_client
                     .send_fastkad_rpc(peer, KadRequest { id: obj }))
             .collect::<FuturesUnordered<_>>()
             .next()
-            .await
-            .ok_or("None of the peers responded")?
+            .await?.ok()
     }
 
     async fn drive_query_for_single_peer(&self, obj: ObjectId, peer: PeerId, filter: Mutex<HashSet<PeerId>>)
-                     -> Option<HashSet<PeerId>> {
-        let mut out = self.network_client.send_fastkad_rpc(peer, KadRequest { id: obj } ).await.ok()?;
+                                         -> Option<HashSet<PeerId>> {
+        let mut peers_to_ask = HashSet::from([peer]);
 
-        loop {
+        while let Some(out) = self.get_first_fastkad_response(obj, peers_to_ask).await {
+            peers_to_ask = out.closer_peers;
+            
             if !out.shortcut_peers.is_empty() {
                 return Some(out.shortcut_peers)
             }
-            else if !out.provider_peers.is_empty() {
+            if !out.provider_peers.is_empty() {
                 return Some(out.provider_peers)
             }
-            else if !out.closer_peers.is_empty() {
-                //out = self.get_first_fastkad_response(obj, out.closer_peers).await.ok()?;
-                out = out.closer_peers
-                    .into_iter()
-                    .map(|peer| self.network_client
-                            .send_fastkad_rpc(peer, KadRequest { id: obj }))
-                    .collect::<FuturesUnordered<_>>()
-                    .next()
-                    .await?.ok()?;
-            }
-            else {
-                return None;
-            }
         }
+
+        None
     }
 
     async fn get_providers(&self, obj_id: ObjectId) -> Result<HashSet<PeerId>, Box<dyn Error + Send + Sync>>{
