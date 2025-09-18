@@ -45,22 +45,31 @@ impl AppController {
     }
 
     async fn get_first_fastkad_response(&self, obj: ObjectId, peers: HashSet<PeerId>)
-        -> Option<KadResponse> {
-        peers
+        -> Option<(PeerId, KadResponse)> {
+        let response_futures = peers
             .into_iter()
-            .map(|peer| self.network_client
-                    .send_fastkad_rpc(peer, KadRequest { id: obj }))
-            .collect::<FuturesUnordered<_>>()
-            .next()
-            .await?.ok()
+            .map(|peer| async move {
+                let response = self.network_client
+                    .send_fastkad_rpc(peer, KadRequest { id: obj }).await?;
+
+                Result::<(PeerId, KadResponse), Box<dyn Error + Send + Sync>>::Ok((peer, response))
+            }.boxed());
+
+        futures::future::select_ok(response_futures).await.ok().map(|res| res.0)
     }
 
-    async fn drive_query_for_single_peer(&self, obj: ObjectId, peer: PeerId, filter: Arc<Mutex<HashSet<PeerId>>>)
+    async fn drive_query_for_single_peer(&self, obj: ObjectId, peer: PeerId, visited_peers: Arc<Mutex<HashSet<PeerId>>>)
                                          -> Option<HashSet<PeerId>> {
         let mut peers_to_ask = HashSet::from([peer]);
 
-        while let Some(out) = self.get_first_fastkad_response(obj, peers_to_ask).await {
-            peers_to_ask = out.closer_peers;
+        while let Some((peer_id, out)) = self.get_first_fastkad_response(obj, peers_to_ask).await {
+            peers_to_ask = {
+                let mut visited = visited_peers.lock().unwrap();
+                let result: HashSet<PeerId> = out.closer_peers.difference(&visited).cloned().collect();
+                visited.insert(peer_id);
+
+                result
+            };
             
             if !out.shortcut_peers.is_empty() {
                 return Some(out.shortcut_peers)
@@ -77,13 +86,13 @@ impl AppController {
         const PARALLEL_FACTOR: usize = 3;
 
         let my_id = self.network_client.get_peer_id();
-        let filter = Arc::new(Mutex::new(HashSet::new()));
+        let visited_peers = Arc::new(Mutex::new(HashSet::new()));
         let out = self.network_client
             .find_closest_local_peers(obj_id, my_id)
             .await
             .into_iter()
             .take(PARALLEL_FACTOR)
-            .map(|peer| self.drive_query_for_single_peer(obj_id, peer.node_id, filter.clone()))
+            .map(|peer| self.drive_query_for_single_peer(obj_id, peer.node_id, visited_peers.clone()))
             .collect::<FuturesUnordered<_>>()
             .next()
             .await
