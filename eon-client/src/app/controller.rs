@@ -1,17 +1,17 @@
 use crate::{
     app::{repl::*, state::AppStateHandle},
-    net::network::Client,
+    net::network::{Client, KadRequest, KadResponse},
 };
 use anyhow::Result;
 use base64::prelude::*;
-use futures::{prelude::*, StreamExt};
+use futures::{prelude::*, stream::FuturesUnordered, StreamExt};
 use libp2p::{
     core::Multiaddr,
-    identity::{self, Keypair},
+    identity::{self, Keypair, PeerId},
     multiaddr::Protocol,
 };
 use objects::{prelude::*, system};
-use std::{error::Error, fs::File, io::Write, path::PathBuf};
+use std::{collections::HashSet, error::Error, fs::File, io::Write, path::PathBuf, sync::Mutex};
 use tokio::{sync::mpsc, task::spawn};
 use tracing::{event, Level};
 
@@ -42,6 +42,52 @@ impl AppController {
                 Some(cmd) = self.rx.recv() => { self.handle_command(cmd).await.unwrap(); }
             }
         }
+    }
+
+    async fn get_first_fastkad_response(&self, obj: ObjectId, peers: HashSet<PeerId>)
+        -> Result<KadResponse, Box<dyn Error + Send + Sync>> {
+        peers
+            .into_iter()
+            .map(|peer| self.network_client
+                    .send_fastkad_rpc(peer, KadRequest { id: obj }))
+            .collect::<FuturesUnordered<_>>()
+            .next()
+            .await
+            .ok_or("None of the peers responded")?
+    }
+
+    async fn drive_query_for_single_peer(&self, obj: ObjectId, peer: PeerId, filter: Mutex<HashSet<PeerId>>)
+                     -> Option<HashSet<PeerId>> {
+        let mut out = self.network_client.send_fastkad_rpc(peer, KadRequest { id: obj } ).await.ok()?;
+
+        loop {
+            if !out.shortcut_peers.is_empty() {
+                return Some(out.shortcut_peers)
+            }
+            else if !out.provider_peers.is_empty() {
+                return Some(out.provider_peers)
+            }
+            else if !out.closer_peers.is_empty() {
+                //out = self.get_first_fastkad_response(obj, out.closer_peers).await.ok()?;
+                out = out.closer_peers
+                    .into_iter()
+                    .map(|peer| self.network_client
+                            .send_fastkad_rpc(peer, KadRequest { id: obj }))
+                    .collect::<FuturesUnordered<_>>()
+                    .next()
+                    .await?.ok()?;
+            }
+            else {
+                return None;
+            }
+        }
+    }
+
+    async fn get_providers(&self, obj_id: ObjectId) -> Result<HashSet<PeerId>, Box<dyn Error + Send + Sync>>{
+        //self.network_client.get
+        let my_id = self.network_client.get_peer_id();
+        let mut closest = self.network_client.find_closest_local_peers(obj_id, my_id);
+        Ok(Default::default())
     }
 
     async fn handle_command(

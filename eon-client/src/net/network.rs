@@ -7,7 +7,7 @@ use std::{
 use futures::{prelude::*, StreamExt};
 use libp2p::{
     core::{ConnectedPoint, Multiaddr},
-    identify, identity, kad,
+    identify, identity::{self, PublicKey}, kad::{self, KadPeer},
     multiaddr::Protocol,
     noise,
     request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel},
@@ -30,9 +30,23 @@ use libp2p::kad::QueryId;
 #[derive(NetworkBehaviour)]
 pub(crate) struct Behaviour {
     pub object_exchange: request_response::cbor::Behaviour<ObjectRpc, ObjectResponse>,
+    pub fastkad: request_response::cbor::Behaviour<KadRequest, KadResponse>,
     pub data_stream: libp2p_stream::Behaviour,
     pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
     pub identify: identify::Behaviour,
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KadRequest {
+    pub id: ObjectId
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct KadResponse {
+    pub closer_peers: HashSet<PeerId>,
+    pub provider_peers: HashSet<PeerId>,
+    pub shortcut_peers: HashSet<PeerId>
 }
 
 // Simple file exchange protocol
@@ -59,6 +73,13 @@ pub(crate) async fn new(
             kademlia: kad::Behaviour::new(
                 peer_id,
                 kad::store::MemoryStore::new(key.public().to_peer_id()),
+            ),
+            fastkad: request_response::cbor::Behaviour::new(
+                [(
+                    StreamProtocol::new("/fastkad/1"),
+                    ProtocolSupport::Full,
+                )],
+                request_response::Config::default(),
             ),
             object_exchange: request_response::cbor::Behaviour::new(
                 [(
@@ -106,6 +127,9 @@ pub(crate) async fn new(
     Ok(Client::new(swarm, id_keys).await)
 }
 
+// Idea: add a #[Constructor] attribute macro to detect user constructors
+// and expand them with necessary init stuff
+
 #[swarm_client(Behaviour)]
 #[derive(Clone)]
 pub(crate) struct Client {
@@ -147,6 +171,10 @@ impl Client {
 
     pub fn get_keys(&self) -> &identity::Keypair {
         &self.keys
+    }
+
+    pub fn get_peer_id(&self) -> PeerId {
+        PeerId::from_public_key(&self.get_keys().public())
     }
 
     /// Listen for incoming connections on the given address.
@@ -283,6 +311,68 @@ impl Client {
         Ok(providers)
     }
 
+    /// Send a Fastkad RPC
+    pub(crate) async fn send_fastkad_rpc(
+        &self,
+        peer: PeerId,
+        request: KadRequest,
+    ) -> Result<KadResponse, Box<dyn Error + Send + Sync>> {
+        let request_id = self
+            .register(move |swarm| {
+                swarm
+                    .behaviour_mut()
+                    .fastkad
+                    .send_request(&peer, request)
+            })
+            .await?;
+
+        let id = request_id.clone();
+        let response_future = subscribe!(
+            id: OutboundRequestId => SwarmEvent::Behaviour(BehaviourEvent::Fastkad(
+                request_response::Event::Message {
+                    message: request_response::Message::Response {
+                        #[key] request_id,
+                        response
+                    },
+                    ..
+                },
+                ..
+            ))
+        );
+
+        let error_future = subscribe!(
+            request_id: OutboundRequestId => SwarmEvent::Behaviour(BehaviourEvent::Fastkad(
+                request_response::Event::OutboundFailure {
+                    #[key] request_id,
+                    error,
+                    ..
+                }
+            ))
+        );
+
+        tokio::select! {
+            Ok(response) = response_future => Ok(response),
+            Ok(error) = error_future => Err(Box::new(error))
+        }
+    }
+
+    /// Respond to Fastkad RPC
+    pub(crate) async fn respond_fastkad_rpc(
+        &self,
+        response: KadResponse,
+        channel: ResponseChannel<KadResponse>,
+    ) {
+        let _ = self
+            .register(move |swarm| {
+                swarm
+                    .behaviour_mut()
+                    .fastkad
+                    .send_response(channel, response)
+                    .expect("Connection to peer to be still open.");
+            })
+            .await;
+    }
+
     /// Send an object RPC
     pub(crate) async fn send_rpc(
         &self,
@@ -349,6 +439,27 @@ impl Client {
         Ok((request.0, channel))
     }
 
+    pub(crate) async fn on_fastkad_request(
+        &self,
+    ) -> Result<(KadRequest, ResponseChannel<KadResponse>), Box<dyn Error + Send + Sync>> {
+        let (request, channel) = subscribe!(
+            _ => SwarmEvent::Behaviour(BehaviourEvent::Fastkad(
+                request_response::Event::Message {
+                    message: request_response::Message::Request {
+                        request,
+                        channel,
+                        ..
+                    },
+                    ..
+                },
+                ..
+            ))
+        )
+        .await?;
+
+        Ok((request, channel))
+    }
+
     /// Respond to an object RPC
     pub(crate) async fn respond_rpc(
         &self,
@@ -364,6 +475,16 @@ impl Client {
                     .expect("Connection to peer to be still open.");
             })
             .await;
+    }
+
+    pub(crate) async fn find_closest_local_peers(&self, id: ObjectId, source: PeerId) -> Vec<KadPeer> {
+        self.register(move |swarm| {
+            swarm
+                .behaviour_mut()
+                .kademlia
+                .find_closest_local_peers(&Vec::from(id).into(), &source)
+                .collect()
+        }).await.unwrap()
     }
 
     pub(crate) async fn open_stream(&self, hash: Hash, id: PeerId) {
