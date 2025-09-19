@@ -344,10 +344,12 @@ impl Client {
         let swarm_tasks = all_peers
             .into_iter()
             .map(|peer| self.register(move |swarm| {
-                swarm
-                    .behaviour_mut()
-                    .kademlia
-                    .add_address(&peer.id, peer.addrs[0].clone());
+                if let Some(addr) = peer.addrs.first() {
+                    swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .add_address(&peer.id, addr.clone());
+                }
             }));
 
         futures::future::join_all(swarm_tasks).await;
