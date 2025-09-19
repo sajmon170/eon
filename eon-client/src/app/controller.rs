@@ -1,17 +1,24 @@
 use crate::{
     app::{repl::*, state::AppStateHandle},
-    net::network::Client,
+    net::network::{Client, KadPeerData, KadRequest, KadResponse},
 };
 use anyhow::Result;
 use base64::prelude::*;
-use futures::{prelude::*, StreamExt};
+use futures::{prelude::*, stream::FuturesUnordered, StreamExt};
 use libp2p::{
     core::Multiaddr,
-    identity::{self, Keypair},
-    multiaddr::Protocol,
+    identity::{self, Keypair, PeerId},
+    multiaddr::Protocol, request_response::ResponseChannel,
 };
 use objects::{prelude::*, system};
-use std::{error::Error, fs::File, io::Write, path::PathBuf};
+use std::{
+    collections::HashSet,
+    error::Error,
+    fs::File,
+    io::Write,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tokio::{sync::mpsc, task::spawn};
 use tracing::{event, Level};
 
@@ -39,9 +46,108 @@ impl AppController {
                         self.network_client.respond_rpc(objects, channel).await;
                     }
                 }
+                Ok((peer, request, channel)) = self.network_client.on_fastkad_request() => {
+                    self.handle_fastkad_request(peer, request, channel).await;
+                }
                 Some(cmd) = self.rx.recv() => { self.handle_command(cmd).await.unwrap(); }
             }
         }
+    }
+
+    async fn handle_fastkad_request(&self, peer: PeerId, request: KadRequest, channel: ResponseChannel<KadResponse>) {
+        let closer_peers = self.network_client.find_closest_local_peers(request.id, peer).await;
+        let provider_peers = self.network_client.find_providers(request.id).await;
+
+        let response = KadResponse {
+            closer_peers: HashSet::from_iter(closer_peers.into_iter()),
+            provider_peers: HashSet::from_iter(provider_peers.into_iter()),
+            ..Default::default()
+        };
+
+        self.network_client.respond_fastkad_rpc(response, channel).await;
+    }
+
+    async fn get_first_fastkad_response(
+        &self,
+        obj: ObjectId,
+        peers: HashSet<KadPeerData>,
+    ) -> Option<(PeerId, KadResponse)> {
+        let response_futures = peers.into_iter().map(|peer| {
+            async move {
+                let response = self
+                    .network_client
+                    .send_fastkad_rpc(peer.clone(), KadRequest { id: obj })
+                    .await?;
+
+                Result::<(PeerId, KadResponse), Box<dyn Error + Send + Sync>>::Ok((peer.id, response))
+            }
+            .boxed()
+        });
+
+        futures::future::select_ok(response_futures)
+            .await
+            .ok()
+            .map(|res| res.0)
+    }
+
+    async fn drive_query_for_single_peer(
+        &self,
+        obj: ObjectId,
+        peer: KadPeerData,
+        visited_peers: Arc<Mutex<HashSet<PeerId>>>,
+        parallel_factor: usize
+    ) -> Option<HashSet<KadPeerData>> {
+        let mut peers_to_ask = HashSet::from([peer]);
+
+        while let Some((peer_id, out)) = self.get_first_fastkad_response(obj, peers_to_ask).await {
+            peers_to_ask = {
+                let mut visited = visited_peers.lock().unwrap();
+                let result = out.closer_peers
+                    .into_iter()
+                    .filter(|x| visited.contains(&x.id))
+                    .take(parallel_factor)
+                    .collect();
+
+                visited.insert(peer_id);
+
+                result
+            };
+
+            if !out.shortcut_peers.is_empty() {
+                return Some(out.shortcut_peers);
+            }
+            if !out.provider_peers.is_empty() {
+                return Some(out.provider_peers);
+            }
+        }
+
+        None
+    }
+
+    async fn get_providers(
+        &self,
+        obj_id: ObjectId,
+    ) -> Result<HashSet<KadPeerData>, Box<dyn Error + Send + Sync>> {
+        const PARALLEL_FACTOR: usize = 3;
+
+        let my_id = self.network_client.get_peer_id();
+        let visited_peers = Arc::new(Mutex::new(HashSet::new()));
+        let out = self
+            .network_client
+            .find_closest_local_peers(obj_id, my_id)
+            .await
+            .into_iter()
+            .take(PARALLEL_FACTOR)
+            .map(|peer| {
+                self.drive_query_for_single_peer(obj_id, peer, visited_peers.clone(), PARALLEL_FACTOR)
+            })
+            .collect::<FuturesUnordered<_>>()
+            .next()
+            .await
+            .ok_or("None of the queries finished")?
+            .ok_or("No providers found")?;
+
+        Ok(out)
     }
 
     async fn handle_command(
@@ -67,13 +173,13 @@ impl AppController {
             Command::Get { name } => {
                 let id: ObjectId = BASE64_STANDARD.decode(&name).unwrap().try_into().unwrap();
 
-                let providers = self.network_client.get_providers(id.clone()).await?;
+                let providers = self.get_providers(id.clone()).await?;
                 if providers.is_empty() {
                     return Err(format!("Could not find provider for file {name}.").into());
                 }
 
                 let requests = providers.into_iter().map(|p| {
-                    event!(Level::INFO, "Found provider: {p}");
+                    event!(Level::INFO, "Found provider: {p:?}");
                     let mut network_client = self.network_client.clone();
 
                     let rpc = GetObject::new(id).make_typed();
