@@ -412,7 +412,7 @@ impl Client {
     /// Send an object RPC
     pub(crate) async fn send_rpc(
         &self,
-        peer: PeerId,
+        peer: KadPeerData,
         rpc: TypedObject,
     ) -> Result<Vec<SignedObject>, Box<dyn Error + Send + Sync>> {
         let request_id = self
@@ -420,7 +420,7 @@ impl Client {
                 swarm
                     .behaviour_mut()
                     .object_exchange
-                    .send_request(&peer, ObjectRpc(rpc))
+                    .send_request_with_addresses(&peer.id, ObjectRpc(rpc), peer.addrs)
             })
             .await?;
 
