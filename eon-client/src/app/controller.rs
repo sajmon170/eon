@@ -1,6 +1,6 @@
 use crate::{
     app::{repl::*, state::AppStateHandle},
-    net::network::{Client, KadRequest, KadResponse},
+    net::network::{Client, KadPeerData, KadRequest, KadResponse},
 };
 use anyhow::Result;
 use base64::prelude::*;
@@ -54,16 +54,16 @@ impl AppController {
     async fn get_first_fastkad_response(
         &self,
         obj: ObjectId,
-        peers: HashSet<PeerId>,
+        peers: HashSet<KadPeerData>,
     ) -> Option<(PeerId, KadResponse)> {
         let response_futures = peers.into_iter().map(|peer| {
             async move {
                 let response = self
                     .network_client
-                    .send_fastkad_rpc(peer, KadRequest { id: obj })
+                    .send_fastkad_rpc(peer.clone(), KadRequest { id: obj })
                     .await?;
 
-                Result::<(PeerId, KadResponse), Box<dyn Error + Send + Sync>>::Ok((peer, response))
+                Result::<(PeerId, KadResponse), Box<dyn Error + Send + Sync>>::Ok((peer.id, response))
             }
             .boxed()
         });
@@ -77,16 +77,19 @@ impl AppController {
     async fn drive_query_for_single_peer(
         &self,
         obj: ObjectId,
-        peer: PeerId,
+        peer: KadPeerData,
         visited_peers: Arc<Mutex<HashSet<PeerId>>>,
-    ) -> Option<HashSet<PeerId>> {
+    ) -> Option<HashSet<KadPeerData>> {
         let mut peers_to_ask = HashSet::from([peer]);
 
         while let Some((peer_id, out)) = self.get_first_fastkad_response(obj, peers_to_ask).await {
             peers_to_ask = {
                 let mut visited = visited_peers.lock().unwrap();
-                let result: HashSet<PeerId> =
-                    out.closer_peers.difference(&visited).cloned().collect();
+                let result = out.closer_peers
+                    .into_iter()
+                    .filter(|x| visited.contains(&x.id))
+                    .collect();
+
                 visited.insert(peer_id);
 
                 result
@@ -106,7 +109,7 @@ impl AppController {
     async fn get_providers(
         &self,
         obj_id: ObjectId,
-    ) -> Result<HashSet<PeerId>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<HashSet<KadPeerData>, Box<dyn Error + Send + Sync>> {
         const PARALLEL_FACTOR: usize = 3;
 
         let my_id = self.network_client.get_peer_id();
@@ -118,7 +121,7 @@ impl AppController {
             .into_iter()
             .take(PARALLEL_FACTOR)
             .map(|peer| {
-                self.drive_query_for_single_peer(obj_id, peer.node_id, visited_peers.clone())
+                self.drive_query_for_single_peer(obj_id, peer, visited_peers.clone())
             })
             .collect::<FuturesUnordered<_>>()
             .next()

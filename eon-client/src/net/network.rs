@@ -42,11 +42,26 @@ pub struct KadRequest {
     pub id: ObjectId
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
+pub struct KadPeerData {
+    pub id: PeerId,
+    pub addrs: Vec<Multiaddr>
+}
+
+impl From<KadPeer> for KadPeerData {
+    fn from(peer: KadPeer) -> Self {
+        Self {
+            id: peer.node_id,
+            addrs: peer.multiaddrs
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct KadResponse {
-    pub closer_peers: HashSet<PeerId>,
-    pub provider_peers: HashSet<PeerId>,
-    pub shortcut_peers: HashSet<PeerId>
+    pub closer_peers: HashSet<KadPeerData>,
+    pub provider_peers: HashSet<KadPeerData>,
+    pub shortcut_peers: HashSet<KadPeerData>
 }
 
 // Simple file exchange protocol
@@ -314,7 +329,7 @@ impl Client {
     /// Send a Fastkad RPC
     pub(crate) async fn send_fastkad_rpc(
         &self,
-        peer: PeerId,
+        peer: KadPeerData,
         request: KadRequest,
     ) -> Result<KadResponse, Box<dyn Error + Send + Sync>> {
         let request_id = self
@@ -322,7 +337,7 @@ impl Client {
                 swarm
                     .behaviour_mut()
                     .fastkad
-                    .send_request(&peer, request)
+                    .send_request_with_addresses(&peer.id, request, peer.addrs)
             })
             .await?;
 
@@ -477,12 +492,13 @@ impl Client {
             .await;
     }
 
-    pub(crate) async fn find_closest_local_peers(&self, id: ObjectId, source: PeerId) -> Vec<KadPeer> {
+    pub(crate) async fn find_closest_local_peers(&self, id: ObjectId, source: PeerId) -> Vec<KadPeerData> {
         self.register(move |swarm| {
             swarm
                 .behaviour_mut()
                 .kademlia
                 .find_closest_local_peers(&Vec::from(id).into(), &source)
+                .map(|peer| KadPeerData::from(peer))
                 .collect()
         }).await.unwrap()
     }
