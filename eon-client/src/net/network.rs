@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use futures::{prelude::*, StreamExt};
+use futures::{prelude::*, stream::FuturesUnordered, StreamExt};
 use libp2p::{
     core::{ConnectedPoint, Multiaddr},
     identify, identity::{self, PublicKey}, kad::{self, KadPeer},
@@ -326,6 +326,24 @@ impl Client {
         Ok(providers)
     }
 
+    async fn update_routing_table(&self, response: KadResponse) {
+        let mut all_peers = HashSet::new();
+        all_peers.extend(response.closer_peers);
+        all_peers.extend(response.provider_peers);
+        all_peers.extend(response.shortcut_peers);
+
+        let swarm_tasks = all_peers
+            .into_iter()
+            .map(|peer| self.register(move |swarm| {
+                swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .add_address(&peer.id, peer.addrs[0].clone());
+            }));
+
+        futures::future::join_all(swarm_tasks).await;
+    }
+
     /// Send a Fastkad RPC
     pub(crate) async fn send_fastkad_rpc(
         &self,
@@ -366,7 +384,10 @@ impl Client {
         );
 
         tokio::select! {
-            Ok(response) = response_future => Ok(response),
+            Ok(response) = response_future => {
+                self.update_routing_table(response.clone()).await;
+                Ok(response)
+            },
             Ok(error) = error_future => Err(Box::new(error))
         }
     }
