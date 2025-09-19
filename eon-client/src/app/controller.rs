@@ -8,7 +8,7 @@ use futures::{prelude::*, stream::FuturesUnordered, StreamExt};
 use libp2p::{
     core::Multiaddr,
     identity::{self, Keypair, PeerId},
-    multiaddr::Protocol,
+    multiaddr::Protocol, request_response::ResponseChannel,
 };
 use objects::{prelude::*, system};
 use std::{
@@ -46,9 +46,25 @@ impl AppController {
                         self.network_client.respond_rpc(objects, channel).await;
                     }
                 }
+                Ok((peer, request, channel)) = self.network_client.on_fastkad_request() => {
+                    self.handle_fastkad_request(peer, request, channel).await;
+                }
                 Some(cmd) = self.rx.recv() => { self.handle_command(cmd).await.unwrap(); }
             }
         }
+    }
+
+    async fn handle_fastkad_request(&self, peer: PeerId, request: KadRequest, channel: ResponseChannel<KadResponse>) {
+        let closer_peers = self.network_client.find_closest_local_peers(request.id, peer).await;
+        let provider_peers = self.network_client.find_providers(request.id).await;
+
+        let response = KadResponse {
+            closer_peers: HashSet::from_iter(closer_peers.into_iter()),
+            provider_peers: HashSet::from_iter(provider_peers.into_iter()),
+            ..Default::default()
+        };
+
+        self.network_client.respond_fastkad_rpc(response, channel).await;
     }
 
     async fn get_first_fastkad_response(

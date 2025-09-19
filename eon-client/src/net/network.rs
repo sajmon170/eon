@@ -7,7 +7,7 @@ use std::{
 use futures::{prelude::*, stream::FuturesUnordered, StreamExt};
 use libp2p::{
     core::{ConnectedPoint, Multiaddr},
-    identify, identity::{self, PublicKey}, kad::{self, KadPeer},
+    identify, identity::{self, PublicKey}, kad::{self, KadPeer, ProviderRecord},
     multiaddr::Protocol,
     noise,
     request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel},
@@ -25,7 +25,7 @@ use objects::system::Hash;
 
 use libp2p_invert::{event_subscriber, swarm_client};
 
-use libp2p::kad::QueryId;
+use libp2p::kad::{QueryId, store::RecordStore};
 
 #[derive(NetworkBehaviour)]
 pub(crate) struct Behaviour {
@@ -53,6 +53,15 @@ impl From<KadPeer> for KadPeerData {
         Self {
             id: peer.node_id,
             addrs: peer.multiaddrs
+        }
+    }
+}
+
+impl From<ProviderRecord> for KadPeerData {
+    fn from(peer: ProviderRecord) -> Self {
+        Self {
+            id: peer.provider,
+            addrs: peer.addresses
         }
     }
 }
@@ -477,10 +486,11 @@ impl Client {
 
     pub(crate) async fn on_fastkad_request(
         &self,
-    ) -> Result<(KadRequest, ResponseChannel<KadResponse>), Box<dyn Error + Send + Sync>> {
-        let (request, channel) = subscribe!(
+    ) -> Result<(PeerId, KadRequest, ResponseChannel<KadResponse>), Box<dyn Error + Send + Sync>> {
+        let (peer, request, channel) = subscribe!(
             _ => SwarmEvent::Behaviour(BehaviourEvent::Fastkad(
                 request_response::Event::Message {
+                    peer,
                     message: request_response::Message::Request {
                         request,
                         channel,
@@ -493,7 +503,7 @@ impl Client {
         )
         .await?;
 
-        Ok((request, channel))
+        Ok((peer, request, channel))
     }
 
     /// Respond to an object RPC
@@ -520,6 +530,20 @@ impl Client {
                 .kademlia
                 .find_closest_local_peers(&Vec::from(id).into(), &source)
                 .map(|peer| KadPeerData::from(peer))
+                .collect()
+        }).await.unwrap()
+    }
+
+    pub(crate) async fn find_providers(&self, id: ObjectId) -> Vec<KadPeerData> {
+        let key = Vec::from(id).into();
+        self.register(move |swarm| {
+            swarm
+                .behaviour_mut()
+                .kademlia
+                .store_mut()
+                .providers(&key)
+                .iter()
+                .filter_map(|record| (record.key == key).then(|| record.clone().into()))
                 .collect()
         }).await.unwrap()
     }
