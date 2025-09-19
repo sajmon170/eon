@@ -79,6 +79,7 @@ impl AppController {
         obj: ObjectId,
         peer: KadPeerData,
         visited_peers: Arc<Mutex<HashSet<PeerId>>>,
+        parallel_factor: usize
     ) -> Option<HashSet<KadPeerData>> {
         let mut peers_to_ask = HashSet::from([peer]);
 
@@ -88,6 +89,7 @@ impl AppController {
                 let result = out.closer_peers
                     .into_iter()
                     .filter(|x| visited.contains(&x.id))
+                    .take(parallel_factor)
                     .collect();
 
                 visited.insert(peer_id);
@@ -121,7 +123,7 @@ impl AppController {
             .into_iter()
             .take(PARALLEL_FACTOR)
             .map(|peer| {
-                self.drive_query_for_single_peer(obj_id, peer, visited_peers.clone())
+                self.drive_query_for_single_peer(obj_id, peer, visited_peers.clone(), PARALLEL_FACTOR)
             })
             .collect::<FuturesUnordered<_>>()
             .next()
