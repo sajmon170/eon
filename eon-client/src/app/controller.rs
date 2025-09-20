@@ -11,6 +11,7 @@ use libp2p::{
     multiaddr::Protocol, request_response::ResponseChannel,
 };
 use objects::{prelude::*, system};
+use serde::Deserialize;
 use std::{
     collections::HashSet,
     error::Error,
@@ -49,6 +50,10 @@ impl AppController {
                 Ok((peer, request, channel)) = self.network_client.on_fastkad_request() => {
                     self.handle_fastkad_request(peer, request, channel).await;
                 }
+                Ok(serialized) = self.network_client.on_store_request() => {
+                    event!(Level::INFO, "Got store request.");
+                    self.handle_store_request(serialized).await;
+                }
                 Some(cmd) = self.rx.recv() => { self.handle_command(cmd).await.unwrap(); }
             }
         }
@@ -68,12 +73,19 @@ impl AppController {
         self.network_client.respond_fastkad_rpc(response, channel).await;
     }
 
+    async fn handle_store_request(&mut self, data: Vec<u8>) {
+        let obj = system::deserialize::<SignedObject>(&data);
+        let id = obj.get_object_id();
+        self.state.add(obj).await;
+        self.network_client.start_providing(id).await;
+    }
+
     async fn get_first_fastkad_response(
         &self,
         obj: ObjectId,
         peers: HashSet<KadPeerData>,
     ) -> Option<(PeerId, KadResponse)> {
-        let response_futures = peers.into_iter().map(|peer| {
+        let mut response_futures = peers.into_iter().map(|peer| {
             async move {
                 let response = self
                     .network_client
@@ -83,12 +95,17 @@ impl AppController {
                 Result::<(PeerId, KadResponse), Box<dyn Error + Send + Sync>>::Ok((peer.id, response))
             }
             .boxed()
-        });
-
-        futures::future::select_ok(response_futures)
-            .await
-            .ok()
-            .map(|res| res.0)
+        }).peekable();
+        
+        if response_futures.peek().is_some() {
+            futures::future::select_ok(response_futures)
+                .await
+                .ok()
+                .map(|res| res.0)
+        }
+        else {
+            None
+        }
     }
 
     async fn drive_query_for_single_peer(
@@ -170,6 +187,22 @@ impl AppController {
 
                 self.state.add(serialized).await;
                 self.network_client.start_providing(obj_id).await;
+
+                None
+            }
+            Command::Publish { path } => {
+                let file = BinaryFile::new(&path);
+                let obj = file
+                    .make_typed()
+                    .sign(self.network_client.get_keys())
+                    .unwrap();
+
+                let id = obj.get_object_id();
+                let data = obj.serialize();
+
+                self.network_client.publish(id, data).await;
+
+                println!("Published: {}", BASE64_STANDARD.encode(&id));
 
                 None
             }

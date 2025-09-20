@@ -7,7 +7,7 @@ use std::{
 use futures::{prelude::*, stream::FuturesUnordered, StreamExt};
 use libp2p::{
     core::{ConnectedPoint, Multiaddr},
-    identify, identity::{self, PublicKey}, kad::{self, KadPeer, ProviderRecord},
+    identify, identity::{self, PublicKey}, kad::{self, KadPeer, ProviderRecord, Record},
     multiaddr::Protocol,
     noise,
     request_response::{self, OutboundRequestId, ProtocolSupport, ResponseChannel},
@@ -94,9 +94,10 @@ pub(crate) async fn new(
             yamux::Config::default,
         )?
         .with_behaviour(|key| Behaviour {
-            kademlia: kad::Behaviour::new(
+            kademlia: kad::Behaviour::with_config(
                 peer_id,
                 kad::store::MemoryStore::new(key.public().to_peer_id()),
+                kad::Config::default().set_record_filtering(kad::StoreInserts::FilterBoth).clone()
             ),
             fastkad: request_response::cbor::Behaviour::new(
                 [(
@@ -304,6 +305,37 @@ impl Client {
         Ok(())
     }
 
+    pub(crate) async fn publish(
+        &self,
+        id: ObjectId,
+        data: Vec<u8>
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let record = Record {
+            key: Vec::from(id).into(),
+            value: data,
+            publisher: Some(self.get_peer_id()),
+            expires: None
+        };
+        
+        let query_id = self.register(move |swarm| {
+            swarm
+                .behaviour_mut()
+                .kademlia
+                .put_record(record, kad::Quorum::Majority)
+                .expect("No store error")
+        }).await?;
+
+        let _ = subscribe!(query_id: QueryId => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
+            kad::Event::OutboundQueryProgressed {
+                #[key] id,
+                result: kad::QueryResult::PutRecord(_),
+                ..
+            }
+        ))).await?;
+        
+        Ok(())
+    }
+
     /// Find the providers for the given file on the DHT.
     pub(crate) async fn get_providers(
         &self,
@@ -463,6 +495,23 @@ impl Client {
             Ok(response) = response_future => Ok(response.0),
             Ok(error) = error_future => Err(Box::new(error))
         }
+    }
+
+    pub(crate) async fn on_store_request(
+        &self,
+    ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
+        let record = subscribe!(
+            _ => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
+                kad::Event::InboundRequest {
+                    request: kad::InboundRequest::PutRecord {
+                        record,
+                        ..
+                    }
+                }
+            ))
+        ).await?.ok_or("No record provided")?;
+
+        Ok(record.value)
     }
 
     pub(crate) async fn on_object_request(
