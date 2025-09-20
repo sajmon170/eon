@@ -26,9 +26,11 @@ use objects::system::Hash;
 use libp2p_invert::{event_subscriber, swarm_client};
 
 use libp2p::kad::{QueryId, store::RecordStore};
+use libp2p::gossipsub;
 
 #[derive(NetworkBehaviour)]
 pub(crate) struct Behaviour {
+    pub management_groups: gossipsub::Behaviour,
     pub object_exchange: request_response::cbor::Behaviour<ObjectRpc, ObjectResponse>,
     pub fastkad: request_response::cbor::Behaviour<KadRequest, KadResponse>,
     pub data_stream: libp2p_stream::Behaviour,
@@ -94,7 +96,11 @@ pub(crate) async fn new(
             yamux::Config::default,
         )?
         .with_behaviour(|key| Behaviour {
-            kademlia: kad::Behaviour::with_config(
+            management_groups: gossipsub::Behaviour::new(
+                gossipsub::MessageAuthenticity::Signed(key.clone()),
+                gossipsub::Config::default()
+            ).expect("The default config must be valid"),
+            kademlia: kad::Behaviour::new(
                 peer_id,
                 kad::store::MemoryStore::new(key.public().to_peer_id()),
                 kad::Config::default().set_record_filtering(kad::StoreInserts::FilterBoth).clone()
