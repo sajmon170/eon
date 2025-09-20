@@ -12,6 +12,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Provide { path: PathBuf },
+    Publish { path: PathBuf },
     Get { name: String },
     Quit
 }

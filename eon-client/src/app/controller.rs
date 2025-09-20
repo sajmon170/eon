@@ -173,6 +173,22 @@ impl AppController {
 
                 None
             }
+            Command::Publish { path } => {
+                let file = BinaryFile::new(&path);
+                let obj = file
+                    .make_typed()
+                    .sign(self.network_client.get_keys())
+                    .unwrap();
+
+                let id = obj.get_object_id();
+                let data = obj.serialize();
+
+                self.network_client.publish(id, data).await;
+
+                println!("Published: {}", BASE64_STANDARD.encode(&id));
+
+                None
+            }
             Command::Get { name } => {
                 let id: ObjectId = BASE64_STANDARD.decode(&name).unwrap().try_into().unwrap();
 
