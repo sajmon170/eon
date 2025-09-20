@@ -94,9 +94,10 @@ pub(crate) async fn new(
             yamux::Config::default,
         )?
         .with_behaviour(|key| Behaviour {
-            kademlia: kad::Behaviour::new(
+            kademlia: kad::Behaviour::with_config(
                 peer_id,
                 kad::store::MemoryStore::new(key.public().to_peer_id()),
+                kad::Config::default().set_record_filtering(kad::StoreInserts::FilterBoth).clone()
             ),
             fastkad: request_response::cbor::Behaviour::new(
                 [(
