@@ -57,11 +57,12 @@ impl AppController {
     async fn handle_fastkad_request(&self, peer: PeerId, request: KadRequest, channel: ResponseChannel<KadResponse>) {
         let closer_peers = self.network_client.find_closest_local_peers(request.id, peer).await;
         let provider_peers = self.network_client.find_providers(request.id).await;
+        let shortcut_peers = self.state.get_providers(request.id).await;
 
         let response = KadResponse {
             closer_peers: HashSet::from_iter(closer_peers.into_iter()),
             provider_peers: HashSet::from_iter(provider_peers.into_iter()),
-            ..Default::default()
+            shortcut_peers: HashSet::from_iter(shortcut_peers.into_iter())
         };
 
         self.network_client.respond_fastkad_rpc(response, channel).await;
@@ -125,7 +126,7 @@ impl AppController {
     }
 
     async fn get_providers(
-        &self,
+        &mut self,
         obj_id: ObjectId,
     ) -> Result<HashSet<KadPeerData>, Box<dyn Error + Send + Sync>> {
         const PARALLEL_FACTOR: usize = 3;
@@ -146,6 +147,8 @@ impl AppController {
             .await
             .ok_or("None of the queries finished")?
             .ok_or("No providers found")?;
+
+        self.state.store_providers(obj_id, Vec::from_iter(out.clone().into_iter()));
 
         Ok(out)
     }

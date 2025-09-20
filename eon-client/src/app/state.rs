@@ -1,13 +1,20 @@
+use crate::net::network::KadPeerData;
+
+use std::collections::HashMap;
+
 use tokio::{sync::{mpsc, oneshot}, task::spawn};
 use objects::prelude::*;
 
 enum DataMessage {
     StoreObject(SignedObject),
-    RpcObject(TypedObject, oneshot::Sender<Option<Vec<SignedObject>>>)
+    RpcObject(TypedObject, oneshot::Sender<Option<Vec<SignedObject>>>),
+    StoreProviders(ObjectId, Vec<KadPeerData>),
+    GetProviders(ObjectId, oneshot::Sender<Vec<KadPeerData>>)
 }
 
 struct AppState {
     parser: ObjectParser,
+    known_providers: HashMap<ObjectId, Vec<KadPeerData>>,
     rx: mpsc::Receiver<DataMessage>
 }
 
@@ -16,7 +23,9 @@ impl AppState {
         while let Some(request) = self.rx.recv().await {
             match request {
                 DataMessage::RpcObject(rpc, sender) => self.parse_rpc(rpc, sender),
-                DataMessage::StoreObject(obj) => self.add_object(obj)
+                DataMessage::StoreObject(obj) => self.add_object(obj),
+                DataMessage::StoreProviders(id, providers) => self.store_providers(id, providers),
+                DataMessage::GetProviders(id, sender) => self.get_providers(id, sender)
             }
         }
     }
@@ -31,6 +40,15 @@ impl AppState {
 
     fn add_object(&mut self, obj: SignedObject) {
         self.parser.parse_object(obj);
+    }
+
+    fn store_providers(&mut self, id: ObjectId, providers: Vec<KadPeerData>) {
+        self.known_providers.insert(id, providers);
+    }
+
+    fn get_providers(&self, id: ObjectId, sender: oneshot::Sender<Vec<KadPeerData>>) {
+        let providers = self.known_providers.get(&id).cloned().unwrap_or_default();
+        let _ = sender.send(providers);
     }
 }
 
@@ -55,7 +73,9 @@ impl AppStateHandle {
         parser.register_query_parser::<WithUuid>();
         parser.register_query_parser::<PinnedWith>();
 
-        let mut state = AppState { parser, rx };
+        let known_providers = HashMap::new();
+
+        let mut state = AppState { parser, known_providers, rx };
 
         spawn(async move {
             state.run().await;
@@ -72,5 +92,15 @@ impl AppStateHandle {
 
     pub async fn add(&mut self, obj: SignedObject) {
         let _ = self.tx.send(DataMessage::StoreObject(obj)).await;
+    }
+
+    pub async fn store_providers(&mut self, id: ObjectId, providers: Vec<KadPeerData>) {
+        let _ = self.tx.send(DataMessage::StoreProviders(id, providers)).await;
+    }
+
+    pub async fn get_providers(&self, id: ObjectId) -> Vec<KadPeerData> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.tx.send(DataMessage::GetProviders(id, tx)).await;
+        rx.await.unwrap()
     }
 }
