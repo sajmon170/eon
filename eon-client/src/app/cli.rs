@@ -4,7 +4,6 @@ use std::io::prelude::*;
 use crate::{
     app::{controller::*, repl::*},
     net::network::Client,
-    CliArgument,
 };
 
 use std::error::Error;
@@ -36,5 +35,11 @@ impl AppCli {
         }
 
         Ok(())
+    }
+
+    pub async fn execute(&mut self, commands: Sequence) {
+        for command in commands {
+            self.controller.send(command).await;
+        }
     }
 }

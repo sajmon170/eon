@@ -18,10 +18,10 @@ use std::{
     fs::File,
     io::Write,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, time::Duration,
 };
-use tokio::{sync::mpsc, task::spawn};
-use tracing::{event, Level};
+use tokio::{sync::{mpsc, oneshot}, task::spawn};
+use tracing::{event, info, Level};
 
 pub enum AppStatus {
     Running,
@@ -31,7 +31,7 @@ pub enum AppStatus {
 struct AppController {
     state: AppStateHandle,
     network_client: Client,
-    rx: mpsc::Receiver<Command>,
+    rx: mpsc::Receiver<(Command, oneshot::Sender<()>)>,
 }
 
 impl AppController {
@@ -54,7 +54,7 @@ impl AppController {
                     event!(Level::INFO, "Got store request.");
                     self.handle_store_request(serialized).await;
                 }
-                Some(cmd) = self.rx.recv() => { self.handle_command(cmd).await.unwrap(); }
+                Some((cmd, sender)) = self.rx.recv() => { self.handle_command(cmd, sender).await.unwrap(); }
             }
         }
     }
@@ -173,6 +173,7 @@ impl AppController {
     async fn handle_command(
         &mut self,
         cmd: Command,
+        sender: oneshot::Sender<()>
     ) -> Result<AppStatus, Box<dyn Error + Send + Sync>> {
         let event: Option<AppStatus> = match cmd {
             Command::Provide { path } => {
@@ -183,7 +184,7 @@ impl AppController {
                     .unwrap();
                 let obj_id = serialized.get_object_id();
 
-                println!("Providing: {}", BASE64_STANDARD.encode(&obj_id));
+                info!("Providing: {}", BASE64_STANDARD.encode(&obj_id));
 
                 self.state.add(serialized).await;
                 self.network_client.start_providing(obj_id).await;
@@ -202,16 +203,15 @@ impl AppController {
 
                 self.network_client.publish(id, data).await;
 
-                println!("Published: {}", BASE64_STANDARD.encode(&id));
+                info!("Published: {}", BASE64_STANDARD.encode(&id));
 
                 None
             }
-            Command::Get { name } => {
-                let id: ObjectId = BASE64_STANDARD.decode(&name).unwrap().try_into().unwrap();
-
+            Command::Get { id } => {
+                let id: ObjectId = id.into();
                 let providers = self.get_providers(id.clone()).await?;
                 if providers.is_empty() {
-                    return Err(format!("Could not find provider for file {name}.").into());
+                    return Err(format!("Could not find provider for file {id:?}.").into());
                 }
 
                 let requests = providers.into_iter().map(|p| {
@@ -235,7 +235,7 @@ impl AppController {
                 let file = system::deserialize::<BinaryFile>(&file.get_data());
 
                 let path = dirs::download_dir().unwrap();
-                println!(
+                info!(
                     "Saving {} to {}",
                     file.filename,
                     path.as_os_str().to_str().unwrap()
@@ -244,16 +244,25 @@ impl AppController {
 
                 None
             }
-
+            Command::Wait { time } => {
+                tokio::time::sleep(*time).await;
+                None
+            }
+            Command::WaitRandom { time } => {
+                let time = rand::random_range(Duration::ZERO..*time);
+                tokio::time::sleep(time).await;
+                None
+            }
             Command::Quit => Some(AppStatus::Done),
         };
 
+        let _ = sender.send(());
         Ok(event.unwrap_or(AppStatus::Running))
     }
 }
 
 pub struct AppControllerHandle {
-    tx: mpsc::Sender<Command>,
+    tx: mpsc::Sender<(Command, oneshot::Sender<()>)>,
 }
 
 impl AppControllerHandle {
@@ -274,6 +283,8 @@ impl AppControllerHandle {
     }
 
     pub async fn send(&mut self, cmd: Command) {
-        let _ = self.tx.send(cmd).await;
+        let (tx, rx) = oneshot::channel();
+        let _ = self.tx.send((cmd, tx)).await;
+        let _ = rx.await;
     }
 }

@@ -2,22 +2,25 @@
 mod app;
 mod net;
 
-use std::{error::Error, io::Write, path::PathBuf, fs::File};
+use std::{error::Error, io::Write, path::PathBuf, fs::File, time::Duration};
 
+use app::repl::Sequence;
 use clap::Parser;
 use futures::{prelude::*, StreamExt};
 use libp2p::{core::Multiaddr, multiaddr::Protocol, identity::{Keypair, self}};
 use tokio::task::spawn;
 use tracing_subscriber::EnvFilter;
 use tracing_appender::{non_blocking, non_blocking::WorkerGuard};
-use tracing::{Level, event};
+use tracing::{Level, event, info};
 use anyhow::Result;
 
 use crate::{net::network, app::cli::AppCli};
 
-fn init_tracing(name: &str) -> Result<WorkerGuard> {
-    let file = File::create(format!("{name}.log"))?;
-    let (non_blocking, guard) = non_blocking(file);
+use serde::{Serialize, Deserialize};
+use serde_with::{base64::Base64, serde_as};
+
+fn init_tracing(output: impl Write + Send + 'static) -> Result<WorkerGuard> {
+    let (non_blocking, guard) = non_blocking(output);
 
     let env_filter = EnvFilter::builder()
         .with_default_directive(Level::INFO.into())
@@ -29,6 +32,15 @@ fn init_tracing(name: &str) -> Result<WorkerGuard> {
         .init();
 
     Ok(guard)
+}
+
+fn init_file_tracing(name: &str) -> Result<WorkerGuard> {
+    let file = File::create(format!("{name}.log"))?;
+    init_tracing(file)
+}
+
+fn init_stdout_tracing() -> Result<WorkerGuard> {
+    init_tracing(std::io::stdout())
 }
 
 fn get_keypair(secret_key_seed: Option<u8>) -> Keypair {
@@ -49,11 +61,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let keypair = get_keypair(opt.secret_key_seed);
     let peer_id = keypair.public().to_peer_id();
-    println!("My id: {peer_id}");
 
-    let _guard = init_tracing(&peer_id.to_base58())?;
+    let _guard = if opt.stdout {
+        init_stdout_tracing()?
+    }
+    else {
+        init_file_tracing(&peer_id.to_base58())?
+    };
 
-    event!(Level::INFO, "Hello.");
+    info!("My id: {peer_id}");
 
     let network_client =
         network::new(keypair, opt.bootstrap_mode).await?;
@@ -88,7 +104,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let mut app = AppCli::new(network_client);
-    app.run().await?;
+
+    if let Some(commands) = opt.script {
+        app.execute(commands).await;
+    }
+    else {
+        app.run().await?;
+    }
 
     Ok(())
 }
@@ -109,20 +131,9 @@ struct Opt {
     #[clap(long, action)]
     bootstrap_mode: bool,
 
-    #[clap(subcommand)]
-    argument: CliArgument,
-}
+    #[clap(long)]
+    stdout: bool,
 
-#[derive(Debug, Parser)]
-pub enum CliArgument {
-    Provide {
-        #[clap(long)]
-        path: PathBuf,
-        #[clap(long)]
-        name: String,
-    },
-    Get {
-        #[clap(long)]
-        name: String,
-    },
+    #[clap(long)]
+    script: Option<Sequence>,
 }
