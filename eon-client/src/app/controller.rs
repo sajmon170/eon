@@ -206,12 +206,11 @@ impl AppController {
 
                 None
             }
-            Command::Get { name } => {
-                let id: ObjectId = BASE64_STANDARD.decode(&name).unwrap().try_into().unwrap();
-
+            Command::Get { id } => {
+                let id: ObjectId = id.into();
                 let providers = self.get_providers(id.clone()).await?;
                 if providers.is_empty() {
-                    return Err(format!("Could not find provider for file {name}.").into());
+                    return Err(format!("Could not find provider for file {id:?}.").into());
                 }
 
                 let requests = providers.into_iter().map(|p| {

@@ -17,7 +17,7 @@ pub struct Cli {
 pub enum Command {
     Provide { path: PathBuf },
     Publish { path: PathBuf },
-    Get { name: CmdObjectId },
+    Get { id: CmdObjectId },
     Wait { time: CmdDuration },
     WaitRandom { time: CmdDuration },
     Quit
@@ -43,6 +43,18 @@ impl Deref for CmdObjectId {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl From<ObjectId> for CmdObjectId {
+    fn from(value: ObjectId) -> Self {
+        Self(value)
+    }
+}
+
+impl From<CmdObjectId> for ObjectId {
+    fn from(value: CmdObjectId) -> Self {
+        value.0
     }
 }
 
