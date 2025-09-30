@@ -19,9 +19,8 @@ use crate::{net::network, app::cli::AppCli};
 use serde::{Serialize, Deserialize};
 use serde_with::{base64::Base64, serde_as};
 
-fn init_tracing(name: &str) -> Result<WorkerGuard> {
-    let file = File::create(format!("{name}.log"))?;
-    let (non_blocking, guard) = non_blocking(file);
+fn init_tracing(output: impl Write + Send + 'static) -> Result<WorkerGuard> {
+    let (non_blocking, guard) = non_blocking(output);
 
     let env_filter = EnvFilter::builder()
         .with_default_directive(Level::INFO.into())
@@ -33,6 +32,15 @@ fn init_tracing(name: &str) -> Result<WorkerGuard> {
         .init();
 
     Ok(guard)
+}
+
+fn init_file_tracing(name: &str) -> Result<WorkerGuard> {
+    let file = File::create(format!("{name}.log"))?;
+    init_tracing(file)
+}
+
+fn init_stdout_tracing() -> Result<WorkerGuard> {
+    init_tracing(std::io::stdout())
 }
 
 fn get_keypair(secret_key_seed: Option<u8>) -> Keypair {
@@ -55,7 +63,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let peer_id = keypair.public().to_peer_id();
     println!("My id: {peer_id}");
 
-    let _guard = init_tracing(&peer_id.to_base58())?;
+    let _guard = if opt.stdout {
+        init_stdout_tracing()?
+    }
+    else {
+        init_file_tracing(&peer_id.to_base58())?
+    };
 
     event!(Level::INFO, "Hello.");
 
@@ -118,6 +131,9 @@ struct Opt {
 
     #[clap(long, action)]
     bootstrap_mode: bool,
+
+    #[clap(long)]
+    stdout: bool,
 
     #[clap(long)]
     script: Option<Sequence>,
