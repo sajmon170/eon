@@ -2,8 +2,9 @@
 mod app;
 mod net;
 
-use std::{error::Error, io::Write, path::PathBuf, fs::File};
+use std::{error::Error, io::Write, path::PathBuf, fs::File, time::Duration};
 
+use app::repl::Sequence;
 use clap::Parser;
 use futures::{prelude::*, StreamExt};
 use libp2p::{core::Multiaddr, multiaddr::Protocol, identity::{Keypair, self}};
@@ -14,6 +15,9 @@ use tracing::{Level, event};
 use anyhow::Result;
 
 use crate::{net::network, app::cli::AppCli};
+
+use serde::{Serialize, Deserialize};
+use serde_with::{base64::Base64, serde_as};
 
 fn init_tracing(name: &str) -> Result<WorkerGuard> {
     let file = File::create(format!("{name}.log"))?;
@@ -88,7 +92,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let mut app = AppCli::new(network_client);
-    app.run().await?;
+
+    if let Some(commands) = opt.script {
+        app.execute(commands).await;
+    }
+    else {
+        app.run().await?;
+    }
 
     Ok(())
 }
@@ -109,20 +119,6 @@ struct Opt {
     #[clap(long, action)]
     bootstrap_mode: bool,
 
-    #[clap(subcommand)]
-    argument: CliArgument,
-}
-
-#[derive(Debug, Parser)]
-pub enum CliArgument {
-    Provide {
-        #[clap(long)]
-        path: PathBuf,
-        #[clap(long)]
-        name: String,
-    },
-    Get {
-        #[clap(long)]
-        name: String,
-    },
+    #[clap(long)]
+    script: Option<Sequence>,
 }

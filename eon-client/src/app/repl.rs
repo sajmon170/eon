@@ -26,6 +26,32 @@ pub enum Command {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sequence(Vec<Command>);
 
+impl FromStr for Sequence {
+    type Err = serde_yaml::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_yaml::from_str(s)
+    }
+}
+
+impl<'a> IntoIterator for &'a Sequence {
+    type Item = &'a Command; 
+    type IntoIter = std::slice::Iter<'a, Command>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl IntoIterator for Sequence {
+    type Item = Command;
+    type IntoIter = std::vec::IntoIter<Command>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CmdObjectId(#[serde_as(as = "Base64")] ObjectId);
