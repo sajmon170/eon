@@ -28,7 +28,7 @@ pub struct Sequence(Vec<Command>);
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct CmdObjectId(#[serde_as(as = "Base64")] ObjectId);
+pub struct CmdObjectId(#[serde_as(as = "Base64")] ObjectId);
 
 impl FromStr for CmdObjectId {
     type Err = serde_yaml::Error;
@@ -59,7 +59,7 @@ impl From<CmdObjectId> for ObjectId {
 }
 
 #[derive(Debug, Clone)]
-struct CmdDuration(humantime::Duration);
+pub struct CmdDuration(humantime::Duration);
 
 impl Serialize for CmdDuration {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

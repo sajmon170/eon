@@ -18,7 +18,7 @@ use std::{
     fs::File,
     io::Write,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, time::Duration,
 };
 use tokio::{sync::mpsc, task::spawn};
 use tracing::{event, Level};
@@ -243,7 +243,15 @@ impl AppController {
 
                 None
             }
-
+            Command::Wait { time } => {
+                tokio::time::sleep(*time).await;
+                None
+            }
+            Command::WaitRandom { time } => {
+                let time = rand::random_range(Duration::ZERO..*time);
+                tokio::time::sleep(time).await;
+                None
+            }
             Command::Quit => Some(AppStatus::Done),
         };
 
