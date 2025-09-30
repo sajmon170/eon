@@ -20,7 +20,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex}, time::Duration,
 };
-use tokio::{sync::mpsc, task::spawn};
+use tokio::{sync::{mpsc, oneshot}, task::spawn};
 use tracing::{event, Level};
 
 pub enum AppStatus {
@@ -31,7 +31,7 @@ pub enum AppStatus {
 struct AppController {
     state: AppStateHandle,
     network_client: Client,
-    rx: mpsc::Receiver<Command>,
+    rx: mpsc::Receiver<(Command, oneshot::Sender<()>)>,
 }
 
 impl AppController {
@@ -54,7 +54,7 @@ impl AppController {
                     event!(Level::INFO, "Got store request.");
                     self.handle_store_request(serialized).await;
                 }
-                Some(cmd) = self.rx.recv() => { self.handle_command(cmd).await.unwrap(); }
+                Some((cmd, sender)) = self.rx.recv() => { self.handle_command(cmd, sender).await.unwrap(); }
             }
         }
     }
@@ -173,6 +173,7 @@ impl AppController {
     async fn handle_command(
         &mut self,
         cmd: Command,
+        sender: oneshot::Sender<()>
     ) -> Result<AppStatus, Box<dyn Error + Send + Sync>> {
         let event: Option<AppStatus> = match cmd {
             Command::Provide { path } => {
@@ -255,12 +256,13 @@ impl AppController {
             Command::Quit => Some(AppStatus::Done),
         };
 
+        let _ = sender.send(());
         Ok(event.unwrap_or(AppStatus::Running))
     }
 }
 
 pub struct AppControllerHandle {
-    tx: mpsc::Sender<Command>,
+    tx: mpsc::Sender<(Command, oneshot::Sender<()>)>,
 }
 
 impl AppControllerHandle {
@@ -281,6 +283,8 @@ impl AppControllerHandle {
     }
 
     pub async fn send(&mut self, cmd: Command) {
-        let _ = self.tx.send(cmd).await;
+        let (tx, rx) = oneshot::channel();
+        let _ = self.tx.send((cmd, tx)).await;
+        let _ = rx.await;
     }
 }
