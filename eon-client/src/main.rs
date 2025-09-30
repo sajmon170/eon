@@ -11,7 +11,7 @@ use libp2p::{core::Multiaddr, multiaddr::Protocol, identity::{Keypair, self}};
 use tokio::task::spawn;
 use tracing_subscriber::EnvFilter;
 use tracing_appender::{non_blocking, non_blocking::WorkerGuard};
-use tracing::{Level, event};
+use tracing::{Level, event, info};
 use anyhow::Result;
 
 use crate::{net::network, app::cli::AppCli};
@@ -61,7 +61,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let keypair = get_keypair(opt.secret_key_seed);
     let peer_id = keypair.public().to_peer_id();
-    println!("My id: {peer_id}");
 
     let _guard = if opt.stdout {
         init_stdout_tracing()?
@@ -70,7 +69,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         init_file_tracing(&peer_id.to_base58())?
     };
 
-    event!(Level::INFO, "Hello.");
+    info!("My id: {peer_id}");
 
     let network_client =
         network::new(keypair, opt.bootstrap_mode).await?;

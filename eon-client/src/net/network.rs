@@ -15,7 +15,7 @@ use libp2p::{
     tcp, yamux, PeerId, StreamProtocol,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{event, Level};
+use tracing::{event, info, Level};
 
 use tokio::sync::{mpsc, oneshot};
 
@@ -142,10 +142,10 @@ pub(crate) async fn new(
             bootstrap_addr.clone().with(Protocol::P2p(bootstrap_id)),
         );
     } else {
-        println!("Bootstrap node!");
+        info!("Bootstrap node!");
     }
 
-    println!("Started node");
+    info!("Started node");
 
     let control = swarm.behaviour().data_stream.new_control();
 

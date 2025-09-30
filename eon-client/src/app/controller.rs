@@ -21,7 +21,7 @@ use std::{
     sync::{Arc, Mutex}, time::Duration,
 };
 use tokio::{sync::{mpsc, oneshot}, task::spawn};
-use tracing::{event, Level};
+use tracing::{event, info, Level};
 
 pub enum AppStatus {
     Running,
@@ -184,7 +184,7 @@ impl AppController {
                     .unwrap();
                 let obj_id = serialized.get_object_id();
 
-                println!("Providing: {}", BASE64_STANDARD.encode(&obj_id));
+                info!("Providing: {}", BASE64_STANDARD.encode(&obj_id));
 
                 self.state.add(serialized).await;
                 self.network_client.start_providing(obj_id).await;
@@ -203,7 +203,7 @@ impl AppController {
 
                 self.network_client.publish(id, data).await;
 
-                println!("Published: {}", BASE64_STANDARD.encode(&id));
+                info!("Published: {}", BASE64_STANDARD.encode(&id));
 
                 None
             }
@@ -235,7 +235,7 @@ impl AppController {
                 let file = system::deserialize::<BinaryFile>(&file.get_data());
 
                 let path = dirs::download_dir().unwrap();
-                println!(
+                info!(
                     "Saving {} to {}",
                     file.filename,
                     path.as_os_str().to_str().unwrap()
