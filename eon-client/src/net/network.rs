@@ -101,20 +101,20 @@ pub(crate) async fn new(
             ),
             fastkad: request_response::cbor::Behaviour::new(
                 [(
-                    StreamProtocol::new("/fastkad/1"),
+                    StreamProtocol::new("/eon/fastkad/1.0.0"),
                     ProtocolSupport::Full,
                 )],
                 request_response::Config::default(),
             ),
             object_exchange: request_response::cbor::Behaviour::new(
                 [(
-                    StreamProtocol::new("/object-exchange/1"),
+                    StreamProtocol::new("/eon/object-exchange/1.0.0"),
                     ProtocolSupport::Full,
                 )],
                 request_response::Config::default(),
             ),
             identify: identify::Behaviour::new(identify::Config::new(
-                String::from("liberum/id/1.0.0"),
+                String::from("/eon/id/1.0.0"),
                 key.public(),
             )),
             data_stream: libp2p_stream::Behaviour::new(),

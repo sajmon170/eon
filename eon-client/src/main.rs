@@ -74,30 +74,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let network_client =
         network::new(keypair, opt.bootstrap_mode).await?;
 
-    // In case a listen address was provided use it, otherwise listen on any
-    // address.
-    match opt.listen_address {
-        Some(addr) => network_client
-            .start_listening(addr)
-            .await
-            .expect("Listening not to fail."),
-        None => network_client
-            .start_listening("/ip4/0.0.0.0/tcp/0".parse()?)
-            .await
-            .expect("Listening not to fail."),
-    };
-
-    // In case the user provided an address of a peer on the CLI, dial it.
-    if let Some(addr) = opt.peer {
-        let Some(Protocol::P2p(peer_id)) = addr.iter().last() else {
-            return Err("Expect peer multiaddr to contain peer ID.".into());
-        };
-        network_client
-            .dial(peer_id, addr)
-            .await
-            .expect("Dial to succeed");
-    }
-
     if !opt.bootstrap_mode {
         network_client.bootstrap().await?;
         event!(Level::INFO, "Finished bootstrapping.");
@@ -121,12 +97,6 @@ struct Opt {
     /// Fixed value to generate deterministic peer ID.
     #[clap(long)]
     secret_key_seed: Option<u8>,
-
-    #[clap(long)]
-    peer: Option<Multiaddr>,
-
-    #[clap(long)]
-    listen_address: Option<Multiaddr>,
 
     #[clap(long, action)]
     bootstrap_mode: bool,
