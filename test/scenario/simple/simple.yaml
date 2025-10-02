@@ -17,10 +17,8 @@ hosts:
   bootstrap:
     network_node_id: 0
     processes:
-    - path: /usr/local/app/mnt/eon-client
-      args: |
-        --bootstrap-mode
-      start_time: 3s
+    - path: /usr/local/app/eon-client/eon-client
+      args: --bootstrap-mode --stdout
       # tell shadow to expect this process to still be running at the end of the
       # simulation
       expected_final_state: running
