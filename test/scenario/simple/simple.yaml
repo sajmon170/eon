@@ -13,13 +13,13 @@ network:
     type: 1_gbit_switch
 
 hosts:
-  # a host with the hostname 'server'
   bootstrap:
     network_node_id: 0
+    ip_addr: 11.0.0.1
     processes:
     - path: /usr/local/app/eon-client/eon-client
       args: |
-        --bootstrap-mode --stdout --script
+        --stdout --bootstrap-mode --script
         "[!Wait {time: 10s}]"
       expected_final_state: running
 
@@ -28,6 +28,6 @@ hosts:
     processes:
     - path: /usr/local/app/eon-client/eon-client
       args: |
-        --stdout --script
+        --stdout --bootstrap-addr 11.0.0.1 --script 
         "[!WaitRandom {time: 3s}, !Publish {path: /usr/local/app/test.txt}, !Wait {time: 10s}]"
       expected_final_state: running
