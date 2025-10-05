@@ -18,7 +18,16 @@ hosts:
     network_node_id: 0
     processes:
     - path: /usr/local/app/eon-client/eon-client
-      args: --bootstrap-mode --stdout
-      # tell shadow to expect this process to still be running at the end of the
-      # simulation
+      args: |
+        --bootstrap-mode --stdout --script
+        "[!Wait {time: 10s}]"
+      expected_final_state: running
+
+  client:
+    network_node_id: 0
+    processes:
+    - path: /usr/local/app/eon-client/eon-client
+      args: |
+        --stdout --script
+        "[!WaitRandom {time: 3s}, !Publish {path: /usr/local/app/test.txt}, !Wait {time: 10s}]"
       expected_final_state: running
