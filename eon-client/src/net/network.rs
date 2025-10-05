@@ -1,7 +1,5 @@
 use std::{
-    collections::{hash_map, HashMap, HashSet},
-    error::Error,
-    time::Duration,
+    collections::{hash_map, HashMap, HashSet}, error::Error, net::Ipv4Addr, time::Duration
 };
 
 use futures::{prelude::*, stream::FuturesUnordered, StreamExt};
@@ -83,6 +81,7 @@ pub(crate) struct ObjectResponse(pub Vec<SignedObject>);
 pub(crate) async fn new(
     id_keys: identity::Keypair,
     is_bootstrap: bool,
+    bootstrap_addr: Ipv4Addr
 ) -> Result<Client, Box<dyn Error + Send + Sync>> {
     let peer_id = id_keys.public().to_peer_id();
 
@@ -135,7 +134,7 @@ pub(crate) async fn new(
         let bootstrap_id: PeerId = "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X"
             .parse()
             .unwrap();
-        let bootstrap_addr: Multiaddr = "/ip4/127.0.0.1/tcp/22137".parse()?;
+        let bootstrap_addr: Multiaddr = format!("/ip4/{}/tcp/22137", bootstrap_addr.to_string()).parse()?;
 
         swarm.behaviour_mut().kademlia.add_address(
             &bootstrap_id,
