@@ -2,7 +2,7 @@
 mod app;
 mod net;
 
-use std::{error::Error, io::Write, path::PathBuf, fs::File, time::Duration};
+use std::{error::Error, io::Write, path::PathBuf, fs::File, time::Duration, net::Ipv4Addr};
 
 use app::repl::Sequence;
 use clap::Parser;
@@ -71,8 +71,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     info!("My id: {peer_id}");
 
+    let bootstrap_addr = opt.bootstrap_addr
+        .unwrap_or(Ipv4Addr::new(127, 0, 0, 1));
+
     let network_client =
-        network::new(keypair, opt.bootstrap_mode).await?;
+        network::new(keypair, opt.bootstrap_mode, bootstrap_addr).await?;
 
     if !opt.bootstrap_mode {
         network_client.bootstrap().await?;
@@ -100,6 +103,9 @@ struct Opt {
 
     #[clap(long, action)]
     bootstrap_mode: bool,
+
+    #[clap(long)]
+    bootstrap_addr: Option<Ipv4Addr>,
 
     #[clap(long)]
     stdout: bool,
