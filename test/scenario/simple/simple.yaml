@@ -19,15 +19,24 @@ hosts:
     processes:
     - path: /usr/local/app/eon-client/eon-client
       args: |
-        --stdout --bootstrap-mode --script
+        --stdout --log-level debug --bootstrap-mode --secret-key-seed 1 --script
         "[!Wait {time: 10s}]"
       expected_final_state: running
 
-  client:
+  object-provider:
     network_node_id: 0
     processes:
     - path: /usr/local/app/eon-client/eon-client
       args: |
-        --stdout --bootstrap-addr 11.0.0.1 --script 
-        "[!WaitRandom {time: 3s}, !Publish {path: /usr/local/app/test.txt}, !Wait {time: 10s}]"
+        --stdout --log-level debug --bootstrap-addr 11.0.0.1 --secret-key-seed 12 --script 
+        "[!Wait {time: 2s}, !Publish {path: /usr/local/app/test.txt}, !Wait {time: 10s}]"
+      expected_final_state: running
+
+  object-consumer:
+    network_node_id: 0
+    processes:
+    - path: /usr/local/app/eon-client/eon-client
+      args: |
+        --stdout --log-level debug --bootstrap-addr 11.0.0.1 --script
+        "[!Wait {time: 4s}, !Get {id: "tfu/bZlxQcGmmf/CqI23mYdDunY90GVF8MVjXNnOVtc="}, !Wait {time: 10s}]"
       expected_final_state: running
