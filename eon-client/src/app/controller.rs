@@ -234,13 +234,7 @@ impl AppController {
                     .unwrap();
                 let file = system::deserialize::<BinaryFile>(&file.get_data());
 
-                let path = dirs::download_dir().unwrap();
-                info!(
-                    "Saving {} to {}",
-                    file.filename,
-                    path.as_os_str().to_str().unwrap()
-                );
-                file.save(&path);
+                info!("Got file: {}", file.filename);
 
                 None
             }
