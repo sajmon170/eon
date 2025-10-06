@@ -19,11 +19,11 @@ use crate::{net::network, app::cli::AppCli};
 use serde::{Serialize, Deserialize};
 use serde_with::{base64::Base64, serde_as};
 
-fn init_tracing(output: impl Write + Send + 'static) -> Result<WorkerGuard> {
+fn init_tracing(output: impl Write + Send + 'static, level: Level) -> Result<WorkerGuard> {
     let (non_blocking, guard) = non_blocking(output);
 
     let env_filter = EnvFilter::builder()
-        .with_default_directive(Level::INFO.into())
+        .with_default_directive(level.into())
         .from_env_lossy();
 
     tracing_subscriber::fmt()
@@ -34,13 +34,13 @@ fn init_tracing(output: impl Write + Send + 'static) -> Result<WorkerGuard> {
     Ok(guard)
 }
 
-fn init_file_tracing(name: &str) -> Result<WorkerGuard> {
+fn init_file_tracing(name: &str, level: Level) -> Result<WorkerGuard> {
     let file = File::create(format!("{name}.log"))?;
-    init_tracing(file)
+    init_tracing(file, level)
 }
 
-fn init_stdout_tracing() -> Result<WorkerGuard> {
-    init_tracing(std::io::stdout())
+fn init_stdout_tracing(level: Level) -> Result<WorkerGuard> {
+    init_tracing(std::io::stdout(), level)
 }
 
 fn get_keypair(secret_key_seed: Option<u8>) -> Keypair {
@@ -62,11 +62,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let keypair = get_keypair(opt.secret_key_seed);
     let peer_id = keypair.public().to_peer_id();
 
+    let log_level = opt.log_level.unwrap_or(Level::INFO);
     let _guard = if opt.stdout {
-        init_stdout_tracing()?
+        init_stdout_tracing(log_level)?
     }
     else {
-        init_file_tracing(&peer_id.to_base58())?
+        init_file_tracing(&peer_id.to_base58(), log_level)?
     };
 
     info!("My id: {peer_id}");
@@ -97,6 +98,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 #[derive(Parser, Debug)]
 #[clap(name = "libp2p file sharing example")]
 struct Opt {
+    #[clap(long)]
+    log_level: Option<Level>,
+    
     /// Fixed value to generate deterministic peer ID.
     #[clap(long)]
     secret_key_seed: Option<u8>,
