@@ -277,8 +277,15 @@ impl AppControllerHandle {
     }
 
     pub async fn send(&mut self, cmd: Command) {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.tx.send((cmd, tx)).await;
-        let _ = rx.await;
+        // TODO - refactor this!
+        // This can't be handled here in the long term
+        if let Command::Wait { time } = cmd {
+            tokio::time::sleep(*time).await;
+        }
+        else {
+            let (tx, rx) = oneshot::channel();
+            let _ = self.tx.send((cmd, tx)).await;
+            let _ = rx.await;
+        }
     }
 }
