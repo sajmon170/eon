@@ -21,7 +21,7 @@ use std::{
     sync::{Arc, Mutex}, time::Duration,
 };
 use tokio::{sync::{mpsc, oneshot}, task::spawn};
-use tracing::{event, info, Level};
+use tracing::{event, info, debug, Level};
 
 pub enum AppStatus {
     Running,
@@ -117,7 +117,10 @@ impl AppController {
     ) -> Option<HashSet<KadPeerData>> {
         let mut peers_to_ask = HashSet::from([peer]);
 
+        let mut i = 0;
         while let Some((peer_id, out)) = self.get_first_fastkad_response(obj, peers_to_ask).await {
+            i = i + 1;
+            
             peers_to_ask = {
                 let mut visited = visited_peers.lock().unwrap();
                 let result = out.closer_peers
@@ -132,9 +135,11 @@ impl AppController {
             };
 
             if !out.shortcut_peers.is_empty() {
+                info!("Found shortcut after asking {i} times");
                 return Some(out.shortcut_peers);
             }
             if !out.provider_peers.is_empty() {
+                info!("Found provider after asking {i} times");
                 return Some(out.provider_peers);
             }
         }
@@ -234,13 +239,7 @@ impl AppController {
                     .unwrap();
                 let file = system::deserialize::<BinaryFile>(&file.get_data());
 
-                let path = dirs::download_dir().unwrap();
-                info!(
-                    "Saving {} to {}",
-                    file.filename,
-                    path.as_os_str().to_str().unwrap()
-                );
-                file.save(&path);
+                info!("Got file: {}", file.filename);
 
                 None
             }
@@ -283,8 +282,15 @@ impl AppControllerHandle {
     }
 
     pub async fn send(&mut self, cmd: Command) {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.tx.send((cmd, tx)).await;
-        let _ = rx.await;
+        // TODO - refactor this!
+        // This can't be handled here in the long term
+        if let Command::Wait { time } = cmd {
+            tokio::time::sleep(*time).await;
+        }
+        else {
+            let (tx, rx) = oneshot::channel();
+            let _ = self.tx.send((cmd, tx)).await;
+            let _ = rx.await;
+        }
     }
 }

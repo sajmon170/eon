@@ -176,7 +176,7 @@ impl Client {
                 );
                 swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
             }
-        });
+        }).await?;
 
         Ok(())
     }
