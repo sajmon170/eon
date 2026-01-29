@@ -62,6 +62,7 @@
               (craneLib.fileset.commonCargoSources crate)
             ];
           };
+          
         eon-client = craneLib.buildPackage (
           individualCrateArgs
           // {
@@ -89,10 +90,18 @@
           }
         );
 
+        dockerImage = pkgs.dockerTools.buildImage {
+          name = "eon-client";
+          tag = "latest";
+          copyToRoot = [ eon-client ];
+          config = {
+            Cmd = [ "${eon-client}/bin/eon-client" ];
+          };
+        };
       in
       {
         packages = {
-          inherit eon-client libp2p-invert objects;
+          inherit eon-client dockerImage libp2p-invert objects;
           default = eon-client;
         };
 
