@@ -93,6 +93,7 @@
       {
         packages = {
           inherit eon-client libp2p-invert objects;
+          default = eon-client;
         };
 
         apps = {
