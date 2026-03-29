@@ -2,7 +2,7 @@
 mod app;
 mod net;
 
-use std::{error::Error, io::Write, path::PathBuf, fs::File, time::Duration, net::Ipv4Addr};
+use std::{error::Error, fs::File, io::Write, net::Ipv4Addr, path::{Path, PathBuf}, str::FromStr, time::Duration};
 
 use app::repl::Sequence;
 use clap::Parser;
@@ -54,6 +54,11 @@ fn get_keypair(secret_key_seed: Option<u8>) -> Keypair {
     }
 }
 
+fn get_commands(path: &Path) -> Result<Sequence, Box<dyn Error + Send + Sync>> { 
+    let script = std::fs::read_to_string(path)?;
+    Ok(Sequence::from_str(&script)?)
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -88,6 +93,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(commands) = opt.script {
         app.execute(commands).await;
     }
+    else if let Some(script_path) = opt.script_path {
+        let commands = get_commands(&script_path)?;
+        app.execute(commands).await;
+    }
     else {
         app.run().await?;
     }
@@ -116,4 +125,7 @@ struct Opt {
 
     #[clap(long)]
     script: Option<Sequence>,
+
+    #[clap(long)]
+    script_path: Option<PathBuf>,
 }
