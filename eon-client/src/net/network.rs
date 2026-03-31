@@ -184,7 +184,7 @@ impl Client {
     pub(crate) async fn bootstrap(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let _ = subscribe!(_ => SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
             kad::Event::OutboundQueryProgressed {
-                result: kad::QueryResult::Bootstrap(result),
+                result: kad::QueryResult::Bootstrap(Ok(_)),
                 ..
             }
         )))
