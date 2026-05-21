@@ -190,14 +190,17 @@ impl Client {
     }
 
     pub(crate) async fn on_new_listen_addr(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let (id, address) = subscribe!(_ => SwarmEvent::NewListenAddr { listener_id, address }).await?;
-        event!(Level::INFO, "New listen address: {address}");
-        if !is_loopback(&address) {
-            self.register(move |swarm| {
-                swarm.add_external_address(address);
-            }).await?;
-        }
-        else {
+        loop {
+            let (id, address) = subscribe!(_ => SwarmEvent::NewListenAddr { listener_id, address }).await?;
+            event!(Level::INFO, "New listen address: {address}");
+            if !is_loopback(&address) {
+                self.register(move |swarm| {
+                    swarm.add_external_address(address);
+                }).await?;
+
+                break
+            }
+
             event!(Level::INFO, "Loopback detected: ignoring listening address");
         }
         Ok(())
