@@ -129,8 +129,12 @@ pub(crate) async fn new(
         }
     }
 
+    let proto = match ip_addr {
+        IpAddr::V4(_) => "ip4",
+        IpAddr::V6(_) => "ip6",
+    };
     let port = if is_bootstrap { 22137 } else { 0 };
-    let multiaddr = format!("/ip4/{ip_addr}/tcp/{port}");
+    let multiaddr = format!("/{proto}/{ip_addr}/tcp/{port}");
     info!("Listening on {multiaddr}");
     swarm.listen_on(multiaddr.parse()?)?;
 
