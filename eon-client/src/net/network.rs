@@ -123,11 +123,11 @@ pub(crate) async fn new(
         .build();
 
     let mut ip_addr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-    for interface in getifaddrs()? {
-        if interface.name == "eth0" && let Some(addr) = interface.address.ip_addr() {
-            ip_addr = addr;
-        }
-    }
+    //for interface in getifaddrs()? {
+    //    if interface.name == "eth0" && let Some(addr) = interface.address.ip_addr() {
+    //        ip_addr = addr;
+    //    }
+    //}
 
     let proto = match ip_addr {
         IpAddr::V4(_) => "ip4",
