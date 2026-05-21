@@ -124,15 +124,15 @@ pub(crate) async fn new(
 
     let mut ip_addr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
     for interface in getifaddrs()? {
-        if interface.name == "eth0" {
-            if let Some(addr) = interface.address.ip_addr() {
-                ip_addr = addr;
-            }
+        if interface.name == "eth0" && let Some(addr) = interface.address.ip_addr() {
+            ip_addr = addr;
         }
     }
 
     let port = if is_bootstrap { 22137 } else { 0 };
-    swarm.listen_on(format!("/ip4/{ip_addr}/tcp/{port}").parse()?)?;
+    let multiaddr = format!("/ip4/{ip_addr}/tcp/{port}");
+    info!("Listening on {multiaddr}");
+    swarm.listen_on(multiaddr.parse()?)?;
 
     info!("Started node");
 
