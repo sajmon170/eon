@@ -75,6 +75,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         init_file_tracing(&peer_id.to_base58(), log_level)?
     };
 
+    if let Some(duration) = opt.delay {
+        info!("Waiting...");
+        tokio::time::sleep(*duration).await;
+    }
+
     info!("My id: {peer_id}");
 
     let network_client =
@@ -113,6 +118,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 #[derive(Parser, Debug)]
 #[clap(name = "libp2p file sharing example")]
 struct Opt {
+    /// Delays the application start. Useful for simulations.
+    #[clap(long)]
+    delay: Option<humantime::Duration>,
+
     #[clap(long)]
     log_level: Option<Level>,
     
